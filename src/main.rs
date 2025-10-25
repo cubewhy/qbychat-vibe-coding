@@ -22,7 +22,17 @@ async fn main() -> anyhow::Result<()> {
     let pool = PgPool::connect(&database_url).await?;
     run_migrations(&pool).await?;
 
-    let state = AppState { pool, clients: Arc::new(dashmap::DashMap::new()), jwt_secret: Arc::new(jwt_secret) };
+    let storage_dir = std::env::var("STORAGE_DIR").unwrap_or_else(|_| "./storage".into());
+    tokio::fs::create_dir_all(&storage_dir).await.ok();
+    let redis = std::env::var("REDIS_URL").ok().and_then(|url| redis::Client::open(url).ok());
+
+    let state = AppState {
+        pool,
+        clients: Arc::new(dashmap::DashMap::new()),
+        jwt_secret: Arc::new(jwt_secret),
+        storage_dir: Arc::new(std::path::PathBuf::from(storage_dir)),
+        redis,
+    };
 
     info!("listening on {}", bind_addr);
     HttpServer::new(move || {

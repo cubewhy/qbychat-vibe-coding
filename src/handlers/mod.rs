@@ -2,6 +2,10 @@ use actix_web::web;
 
 pub mod auth;
 pub mod chats;
+pub mod users;
+pub mod files;
+pub mod uploads;
+pub mod admin;
 
 pub fn config(cfg: &mut web::ServiceConfig) {
     cfg.service(auth::register)
@@ -15,5 +19,12 @@ pub fn config(cfg: &mut web::ServiceConfig) {
        .service(chats::remove_participant)
        .service(chats::mute_member)
        .service(chats::unmute_member)
-       .service(chats::list_messages);
+       .service(chats::list_messages)
+       .service(users::upload_avatars)
+       .service(users::set_primary)
+       .service(users::list_avatars)
+       .service(files::create_download_token)
+       .service(files::download_file)
+       .service(uploads::upload_files)
+       .service(admin::purge_storage);
 }

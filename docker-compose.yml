@@ -22,11 +22,19 @@ services:
       JWT_SECRET: ${JWT_SECRET:-devsecretchangeme}
       RUST_LOG: ${RUST_LOG:-info}
       BIND_ADDR: 0.0.0.0:8080
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-changeme}
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
     ports:
       - "8080:8080"
     command: ["/app/qbychat-vibe-coding"]
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
 volumes:
   db-data:

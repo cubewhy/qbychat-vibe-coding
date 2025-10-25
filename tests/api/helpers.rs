@@ -26,7 +26,9 @@ impl TestApp {
         let port = listener.local_addr()?.port();
         let address = format!("http://127.0.0.1:{}", port);
 
-        let state = AppState { pool: pool.clone(), clients: Arc::new(dashmap::DashMap::new()), jwt_secret: Arc::new("testsecret".to_string()) };
+        std::env::set_var("ADMIN_TOKEN", "test_admin");
+        std::fs::create_dir_all("./.test-storage").ok();
+        let state = AppState { pool: pool.clone(), clients: Arc::new(dashmap::DashMap::new()), jwt_secret: Arc::new("testsecret".to_string()), storage_dir: Arc::new(std::path::PathBuf::from("./.test-storage")), redis: std::env::var("REDIS_URL").ok().and_then(|u| redis::Client::open(u).ok()) };
 
         let server = HttpServer::new(move || {
             App::new()

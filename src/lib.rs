@@ -3,6 +3,7 @@ pub mod models;
 pub mod auth;
 pub mod handlers;
 pub mod ws;
+pub mod upload;
 
 use actix_web::{App, web};
 use actix_web::dev::ServiceRequest;

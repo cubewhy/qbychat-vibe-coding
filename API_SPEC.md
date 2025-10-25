@@ -141,6 +141,27 @@ Response 200:
 
 403: not a participant
 
+### Avatars & Files
+
+- POST /api/users/me/avatars (multipart)
+  - Upload one or multiple images. Returns uploaded avatar list.
+  - Query: compress=true|false (default false), quality=1..100 (default 80). When compressing images, EXIF is stripped.
+- POST /api/users/me/avatars/primary
+  - Set primary avatar: {"avatar_id":"uuid"}
+- GET /api/users/{user_id}/avatars
+  - List all avatars of user: [{id, content_type, is_primary, created_at}]
+- POST /api/files (multipart)
+  - Generic file upload with de-duplication by sha256. Query: compress=true|false, quality=1..100. Image files will be compressed and EXIF stripped when compress=true. If the uploaded content already exists (same sha256), the existing file id is returned. Returns [{id, content_type, created_at}]
+- POST /api/files/download_token
+  - Request a short-lived token to download an avatar file: {"avatar_id":"uuid"}
+  - Returns {"token":"string","expires_at":"RFC3339"}
+- GET /api/files/{token}
+  - Download file using token. Token expires (default 30min via DOWNLOAD_TOKEN_TTL_SECS). Requires Redis.
+- POST /api/admin/storage/purge
+  - Purge unreferenced storage files (no rows in message_attachments). Auth: X-Admin-Token header must equal env ADMIN_TOKEN. Response: {"deleted": number}
+- Cron purge
+  - Deploy an external cron (e.g., host or container) to call POST /api/admin/storage/purge daily at 00:00.
+
 ## WebSocket
 
 Path: /ws?token=...
