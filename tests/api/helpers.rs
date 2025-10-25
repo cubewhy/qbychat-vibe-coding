@@ -71,6 +71,7 @@ impl TestApp {
             admin_token: Arc::new(shared_config.admin.token.clone()),
             typing: Arc::new(DashMap::new()),
             presence: Arc::new(DashMap::new()),
+            sequence_counter: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         };
 
         let (tx, rx) = tokio::sync::oneshot::channel();

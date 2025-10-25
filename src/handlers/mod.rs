@@ -4,6 +4,7 @@ pub mod admin;
 pub mod auth;
 pub mod chat_list;
 pub mod chats;
+pub mod contacts;
 pub mod files;
 pub mod gifs;
 pub mod members;
@@ -18,6 +19,11 @@ pub fn config(cfg: &mut web::ServiceConfig) {
     cfg.service(auth::register)
         .service(auth::login)
         .service(auth::refresh_token)
+        .service(contacts::list_contacts)
+        .service(contacts::add_contact)
+        .service(contacts::remove_contact)
+        .service(contacts::block_contact)
+        .service(contacts::unblock_contact)
         .service(chats::start_direct_chat)
         .service(chats::create_group)
         .service(chats::create_channel)

@@ -27,4 +27,5 @@ pub struct AppState {
     pub admin_token: Arc<String>,
     pub typing: Arc<DashMap<(Uuid, Uuid), tokio::time::Instant>>, // (chat_id, user_id) -> typing start time
     pub presence: Arc<DashMap<Uuid, PresenceStatus>>,
+    pub sequence_counter: Arc<std::sync::atomic::AtomicU64>,
 }

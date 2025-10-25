@@ -4,7 +4,7 @@ use crate::state::AppState;
 use actix_web::{post, web, HttpResponse};
 use sqlx::types::Uuid;
 
-#[post("/api/register")]
+#[post("/v1/api/register")]
 pub async fn register(
     state: web::Data<AppState>,
     payload: web::Json<RegisterReq>,
@@ -37,7 +37,7 @@ pub async fn register(
     Ok(HttpResponse::Ok().json(AuthResp { token, refresh_token: refresh_token_str, user: rec }))
 }
 
-#[post("/api/login")]
+#[post("/v1/api/login")]
 pub async fn login(
     state: web::Data<AppState>,
     payload: web::Json<LoginReq>,
@@ -96,7 +96,7 @@ fn hash_password(pw: &str) -> anyhow::Result<String> {
     Ok(argon2.hash_password(pw.as_bytes(), &salt)?.to_string())
 }
 
-#[post("/api/refresh_token")]
+#[post("/v1/api/refresh_token")]
 pub async fn refresh_token(
     state: web::Data<AppState>,
     payload: web::Json<RefreshTokenReq>,

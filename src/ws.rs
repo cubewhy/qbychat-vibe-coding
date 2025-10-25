@@ -6,6 +6,7 @@ use actix_ws::{Message, MessageStream, Session};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sqlx::types::Uuid;
+use std::sync::atomic::Ordering;
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
@@ -24,29 +25,33 @@ pub enum ClientWsMsg {
 #[serde(tag = "type")]
 pub enum ServerWsMsg {
     #[serde(rename = "new_message")]
-    NewMessage { message: MessageRow },
+    NewMessage { sequence_id: u64, message: MessageRow },
     #[serde(rename = "error")]
-    Error { code: String, message: String },
+    Error { sequence_id: u64, code: String, message: String },
     #[serde(rename = "typing_indicator")]
-    TypingIndicator { chat_id: Uuid, user: UserInfo },
+    TypingIndicator { sequence_id: u64, chat_id: Uuid, user: UserInfo },
     #[serde(rename = "message_edited")]
-    MessageEdited { message: MessageRow },
+    MessageEdited { sequence_id: u64, message: MessageRow },
     #[serde(rename = "message_deleted")]
-    MessageDeleted { chat_id: Uuid, message_ids: Vec<Uuid> },
+    MessageDeleted { sequence_id: u64, chat_id: Uuid, message_ids: Vec<Uuid> },
     #[serde(rename = "messages_read")]
-    MessagesRead { chat_id: Uuid, reader_user_id: Uuid, last_read_message_id: Uuid, read_count: Option<i32>, is_read_by_peer: Option<bool> },
+    MessagesRead { sequence_id: u64, chat_id: Uuid, reader_user_id: Uuid, last_read_message_id: Uuid, read_count: Option<i32>, is_read_by_peer: Option<bool> },
     #[serde(rename = "presence_update")]
-    PresenceUpdate { user_id: Uuid, status: String, last_seen_at: Option<String> },
+    PresenceUpdate { sequence_id: u64, user_id: Uuid, status: String, last_seen_at: Option<String> },
     #[serde(rename = "chat_action")]
-    ChatAction { chat_id: Uuid, action_type: String, data: serde_json::Value },
+    ChatAction { sequence_id: u64, chat_id: Uuid, action_type: String, data: serde_json::Value },
     #[serde(rename = "ack")]
-    Ack { request_id: Uuid },
+    Ack { sequence_id: u64, request_id: Uuid },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UserInfo {
     pub id: Uuid,
     pub username: String,
+}
+
+fn next_sequence_id(state: &AppState) -> u64 {
+    state.sequence_counter.fetch_add(1, Ordering::SeqCst)
 }
 
 #[derive(sqlx::FromRow)]
@@ -101,7 +106,8 @@ async fn ws_session(
     // Broadcast presence update to users with common chats
     let common_users = get_common_chat_users(&state, user_id).await;
     let presence_msg = ServerWsMsg::PresenceUpdate {
-        user_id,
+        sequence_id: next_sequence_id(&state),
+        user_id: user_id.clone(),
         status: "online".to_string(),
         last_seen_at: None,
     };
@@ -147,6 +153,7 @@ async fn ws_session(
     // Broadcast presence update
     let common_users = get_common_chat_users(&state, user_id).await;
     let presence_msg = ServerWsMsg::PresenceUpdate {
+        sequence_id: next_sequence_id(&state),
         user_id,
         status: "offline".to_string(),
         last_seen_at: Some(now.to_rfc3339()),
@@ -226,10 +233,7 @@ async fn handle_ws_text(state: &AppState, user_id: Uuid, txt: &str) -> anyhow::R
             .fetch_one(&state.pool)
             .await?;
 
-            #[derive(sqlx::FromRow)]
-            struct UserIdRow {
-                user_id: Uuid,
-            }
+
             let participants = sqlx::query_as::<_, UserIdRow>(
                 "SELECT user_id FROM chat_participants WHERE chat_id = $1",
             )
@@ -238,16 +242,17 @@ async fn handle_ws_text(state: &AppState, user_id: Uuid, txt: &str) -> anyhow::R
             .await?;
 
             let server_msg = ServerWsMsg::NewMessage {
-                message: saved.clone(),
+                sequence_id: next_sequence_id(&state),
+                message: saved,
             };
-            for p in participants {
-                if let Some(tx) = state.clients.get(&p.user_id) {
+            for uid in participants {
+                if let Some(tx) = state.clients.get(&uid.user_id) {
                     let _ = tx.send(server_msg.clone());
                 }
             }
             if let Some(rid) = request_id {
                 if let Some(tx) = state.clients.get(&user_id) {
-                    let _ = tx.send(ServerWsMsg::Ack { request_id: rid });
+                    let _ = tx.send(ServerWsMsg::Ack { sequence_id: next_sequence_id(&state), request_id: rid });
                 }
             }
         }
@@ -284,7 +289,7 @@ async fn handle_ws_text(state: &AppState, user_id: Uuid, txt: &str) -> anyhow::R
             .bind(user_id)
             .fetch_all(&state.pool)
             .await?;
-            let typing_msg = ServerWsMsg::TypingIndicator { chat_id, user: user_info };
+            let typing_msg = ServerWsMsg::TypingIndicator { sequence_id: next_sequence_id(&state), chat_id, user: user_info };
             for p in participants {
                 if let Some(tx) = state.clients.get(&p.user_id) {
                     let _ = tx.send(typing_msg.clone());
@@ -292,7 +297,7 @@ async fn handle_ws_text(state: &AppState, user_id: Uuid, txt: &str) -> anyhow::R
             }
             if let Some(rid) = request_id {
                 if let Some(tx) = state.clients.get(&user_id) {
-                    let _ = tx.send(ServerWsMsg::Ack { request_id: rid });
+                    let _ = tx.send(ServerWsMsg::Ack { sequence_id: next_sequence_id(&state), request_id: rid });
                 }
             }
         }
@@ -321,6 +326,7 @@ async fn handle_ws_text(state: &AppState, user_id: Uuid, txt: &str) -> anyhow::R
                 .bind(chat_id)
                 .fetch_one(&state.pool)
                 .await?;
+            let is_read_by_peer = chat_type == "direct";
             if chat_type == "direct" {
                 // Find peer
                 let peer_id = sqlx::query_scalar::<_, Uuid>(
@@ -333,11 +339,12 @@ async fn handle_ws_text(state: &AppState, user_id: Uuid, txt: &str) -> anyhow::R
                 // Send to peer
                 if let Some(tx) = state.clients.get(&peer_id) {
                     let _ = tx.send(ServerWsMsg::MessagesRead {
+                        sequence_id: next_sequence_id(&state),
                         chat_id,
-                        reader_user_id: user_id,
+                        reader_user_id: user_id.clone(),
                         last_read_message_id,
                         read_count: None,
-                        is_read_by_peer: Some(true),
+                        is_read_by_peer: None,
                     });
                 }
             } else {
@@ -365,17 +372,18 @@ async fn handle_ws_text(state: &AppState, user_id: Uuid, txt: &str) -> anyhow::R
                         None
                     };
                     let _ = tx.send(ServerWsMsg::MessagesRead {
+                        sequence_id: next_sequence_id(&state),
                         chat_id,
-                        reader_user_id: user_id,
+                        reader_user_id: user_id.clone(),
                         last_read_message_id,
-                        read_count,
-                        is_read_by_peer: None,
+                        read_count: read_count.map(|c| c as i32),
+                        is_read_by_peer: Some(is_read_by_peer),
                     });
                 }
             }
             if let Some(rid) = request_id {
                 if let Some(tx) = state.clients.get(&user_id) {
-                    let _ = tx.send(ServerWsMsg::Ack { request_id: rid });
+                    let _ = tx.send(ServerWsMsg::Ack { sequence_id: next_sequence_id(&state), request_id: rid });
                 }
             }
         }
@@ -386,6 +394,7 @@ async fn handle_ws_text(state: &AppState, user_id: Uuid, txt: &str) -> anyhow::R
 fn send_ws_err(state: &AppState, user_id: Uuid, code: &str, msg: &str) {
     if let Some(tx) = state.clients.get(&user_id) {
         let _ = tx.send(ServerWsMsg::Error {
+            sequence_id: next_sequence_id(&state),
             code: code.to_string(),
             message: msg.to_string(),
         });

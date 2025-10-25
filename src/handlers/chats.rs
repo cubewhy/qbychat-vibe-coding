@@ -94,7 +94,7 @@ fn has_perm(
     perms.map(f).unwrap_or(false)
 }
 
-#[post("/api/chats/direct")]
+#[post("/v1/api/chats/direct")]
 #[instrument(skip(state, req, user))]
 pub async fn start_direct_chat(
     state: web::Data<AppState>,
@@ -108,7 +108,7 @@ pub async fn start_direct_chat(
     Ok(HttpResponse::Created().json(chat_dto))
 }
 
-#[post("/api/chats/group")]
+#[post("/v1/api/chats/group")]
 #[instrument(skip(state, req, user))]
 pub async fn create_group(
     state: web::Data<AppState>,
@@ -120,7 +120,7 @@ pub async fn create_group(
     Ok(HttpResponse::Created().json(chat_dto))
 }
 
-#[post("/api/chats/channel")]
+#[post("/v1/api/chats/channel")]
 #[instrument(skip(state, req, user))]
 pub async fn create_channel(
     state: web::Data<AppState>,
@@ -166,7 +166,7 @@ async fn create_chat_with_owner(
     Ok(chat_id)
 }
 
-#[post("/api/chats/{chat_id}/participants")]
+#[post("/v1/api/chats/{chat_id}/participants")]
 #[instrument(skip(state, req, user), fields(chat_id = %path))]
 pub async fn add_participant(
     state: web::Data<AppState>,
@@ -203,7 +203,7 @@ pub async fn add_participant(
     Ok(HttpResponse::Ok().finish())
 }
 
-#[get("/api/chats/{chat_id}/admins")]
+#[get("/v1/api/chats/{chat_id}/admins")]
 #[instrument(skip(state, user))]
 pub async fn list_admins(
     state: web::Data<AppState>,
@@ -275,7 +275,7 @@ pub async fn list_admins(
     })))
 }
 
-#[post("/api/chats/{chat_id}/admins")]
+#[post("/v1/api/chats/{chat_id}/admins")]
 #[instrument(skip(state, req, user))]
 pub async fn promote_admin(
     state: web::Data<AppState>,
@@ -327,7 +327,7 @@ pub async fn promote_admin(
     })))
 }
 
-#[delete("/api/chats/{chat_id}/admins")]
+#[delete("/v1/api/chats/{chat_id}/admins")]
 #[instrument(skip(state, req, user))]
 pub async fn demote_admin(
     state: web::Data<AppState>,
@@ -349,7 +349,7 @@ pub async fn demote_admin(
     Ok(HttpResponse::Ok().finish())
 }
 
-#[delete("/api/chats/{chat_id}/participants")]
+#[delete("/v1/api/chats/{chat_id}/participants")]
 #[instrument(skip(state, req, user))]
 pub async fn remove_participant(
     state: web::Data<AppState>,
@@ -393,6 +393,7 @@ pub async fn remove_participant(
     .await
     .map_err(internal_err)?;
     let msg = ServerWsMsg::ChatAction {
+        sequence_id: state.sequence_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
         chat_id,
         action_type: "user_left".to_string(),
         data: serde_json::json!({ "user": { "id": req.user_id, "username": username } }),
@@ -406,7 +407,7 @@ pub async fn remove_participant(
     Ok(HttpResponse::Ok().finish())
 }
 
-#[post("/api/chats/{chat_id}/actions/mute")]
+#[post("/v1/api/chats/{chat_id}/actions/mute")]
 #[instrument(skip(state, req, user))]
 pub async fn mute_member(
     state: web::Data<AppState>,
@@ -433,7 +434,7 @@ pub async fn mute_member(
     Ok(HttpResponse::Ok().finish())
 }
 
-#[post("/api/chats/{chat_id}/actions/unmute")]
+#[post("/v1/api/chats/{chat_id}/actions/unmute")]
 #[instrument(skip(state, req, user))]
 pub async fn unmute_member(
     state: web::Data<AppState>,
@@ -456,7 +457,7 @@ pub async fn unmute_member(
     Ok(HttpResponse::Ok().finish())
 }
 
-#[post("/api/chats/{chat_id}/actions/leave")]
+#[post("/v1/api/chats/{chat_id}/actions/leave")]
 #[instrument(skip(state, user))]
 pub async fn leave_chat(
     state: web::Data<AppState>,
@@ -488,7 +489,7 @@ pub async fn leave_chat(
     Ok(HttpResponse::Ok().finish())
 }
 
-#[post("/api/chats/{chat_id}/actions/clear_messages")]
+#[post("/v1/api/chats/{chat_id}/actions/clear_messages")]
 #[instrument(skip(state, user))]
 pub async fn clear_messages(
     state: web::Data<AppState>,
@@ -534,7 +535,7 @@ struct MessageRecord {
     forward_from_sender_id: Option<Uuid>,
 }
 
-#[get("/api/chats/{chat_id}/messages")]
+#[get("/v1/api/chats/{chat_id}/messages")]
 #[instrument(skip(state, user, q))]
 pub async fn list_messages(
     state: web::Data<AppState>,
@@ -1091,7 +1092,7 @@ async fn build_chat_dto(
     })
 }
 
-#[post("/api/chats/{chat_id}/visibility")]
+#[post("/v1/api/chats/{chat_id}/visibility")]
 #[instrument(skip(state, req, user))]
 pub async fn set_visibility(
     state: web::Data<AppState>,
@@ -1150,7 +1151,7 @@ pub struct PublicSearchQuery {
     pub handle: String,
 }
 
-#[get("/api/chats/public_search")]
+#[get("/v1/api/chats/public_search")]
 pub async fn public_search(
     state: web::Data<AppState>,
     q: web::Query<PublicSearchQuery>,
@@ -1174,7 +1175,7 @@ pub async fn public_search(
     Ok(HttpResponse::Ok().json(serde_json::json!({ "results": rows })))
 }
 
-#[post("/api/chats/public_join")]
+#[post("/v1/api/chats/public_join")]
 pub async fn public_join(
     state: web::Data<AppState>,
     user: AuthUser,
@@ -1222,7 +1223,7 @@ pub async fn public_join(
     Ok(HttpResponse::Ok().json(serde_json::json!({"chat_id": chat.id})))
 }
 
-#[get("/api/chats/{chat_id}/messages/search")]
+#[get("/v1/api/chats/{chat_id}/messages/search")]
 pub async fn search_messages(
     state: web::Data<AppState>,
     path: web::Path<Uuid>,

@@ -1,9 +1,22 @@
 # QbyChat API Spec
 
-Base URL: http://localhost:8080
+Base URL: http://localhost:8080/v1
 Auth: Bearer JWT in Authorization header. For WebSocket, pass ?token=... or Authorization header.
 
 This project aims to be a lightweight Telegram-like clone.
+
+## Error Responses
+
+All error responses (4xx, 5xx) follow a standardized JSON format:
+
+{
+  "error": {
+    "code": "string",
+    "message": "string"
+  }
+}
+
+Common error codes: USERNAME_EXISTS, INVALID_PAYLOAD, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, INTERNAL_ERROR
 
 ## Objects
 
@@ -13,8 +26,8 @@ This project aims to be a lightweight Telegram-like clone.
   "username": "string",
   "bio": "string|null",
   "is_online": bool,
-  "last_seen_at": "RFC3339|null",
-  "online_status_visibility": "everyone" | "contacts" | "nobody",
+  "last_seen_at": "RFC3339|null", // Updated when user performs authenticated actions or disconnects from WebSocket
+  "online_status_visibility": "everyone" | "contacts" | "nobody", // Controls who can see online status; "contacts" requires friend relationship
   "created_at": "RFC3339"
 }
 
@@ -89,6 +102,55 @@ Response 200:
 [
   {"id":"uuid","username":"string","bio":"string|null","is_online":bool,"last_seen_at":"RFC3339|null"}
 ]
+
+## Contacts
+
+Contacts represent user relationships. Status can be "friend" or "blocked". Blocked users cannot send messages or add to groups.
+
+### GET /api/contacts
+
+List current user's contacts.
+
+Response 200:
+[
+  {
+    "user": UserObject,
+    "status": "friend" | "blocked",
+    "added_at": "RFC3339"
+  }
+]
+
+### POST /api/contacts/add
+
+Add a user as friend by user_id.
+
+Request:
+{"user_id":"uuid"}
+
+Response 201: empty
+409: already added or blocked
+404: user not found
+
+### DELETE /api/contacts/{user_id}
+
+Remove a contact (unfriend).
+
+Response 204: No Content
+404: not a contact
+
+### POST /api/contacts/{user_id}/block
+
+Block a user. This removes them from contacts if they were friends.
+
+Response 204: No Content
+404: user not found
+
+### DELETE /api/contacts/{user_id}/block
+
+Unblock a user.
+
+Response 204: No Content
+404: not blocked
 
 ## Chats
 
@@ -488,7 +550,7 @@ Rate limiting: POST /api/chats/{chat_id}/messages is rate limited (e.g., 10 mess
 
 ## WebSocket
 
-Path: /ws?token=...
+Path: /v1/ws?token=...
 
 Client -> Server messages (JSON):
 
@@ -498,15 +560,17 @@ Client -> Server messages (JSON):
 
 Server -> Client messages (JSON):
 
-- {"type":"new_message","message": Message}
-- {"type":"error","code": "string","message": string}
-- {"type":"typing_indicator","chat_id":"uuid","user":{"id":"uuid","username":"string"}}
-- {"type":"message_edited","message": Message}
-- {"type":"message_deleted","chat_id":"uuid","message_ids":["uuid",...]}
-- {"type":"messages_read","chat_id":"uuid","reader_user_id":"uuid","last_read_message_id":"uuid","read_count":number|null,"is_read_by_peer":bool|null}
-- {"type":"presence_update","user_id":"uuid","status":"online|offline","last_seen_at":"RFC3339|null"}
-- {"type":"chat_action","chat_id":"uuid","action_type":"string","data":{...}}
-- {"type":"ack","request_id":"uuid"} // acknowledgment for C2S events with request_id
+All S2C messages include a sequence_id (monotonically increasing u64) for ordering guarantees.
+
+- {"type":"new_message","sequence_id":123,"message": Message}
+- {"type":"error","sequence_id":124,"code": "string","message": string}
+- {"type":"typing_indicator","sequence_id":125,"chat_id":"uuid","user":{"id":"uuid","username":"string"}}
+- {"type":"message_edited","sequence_id":126,"message": Message}
+- {"type":"message_deleted","sequence_id":127,"chat_id":"uuid","message_ids":["uuid",...]}
+- {"type":"messages_read","sequence_id":128,"chat_id":"uuid","reader_user_id":"uuid","last_read_message_id":"uuid","read_count":number|null,"is_read_by_peer":bool|null}
+- {"type":"presence_update","sequence_id":129,"user_id":"uuid","status":"online|offline","last_seen_at":"RFC3339|null"}
+- {"type":"chat_action","sequence_id":130,"chat_id":"uuid","action_type":"string","data":{...}}
+- {"type":"ack","sequence_id":131,"request_id":"uuid"} // acknowledgment for C2S events with request_id
 
 Notes:
 

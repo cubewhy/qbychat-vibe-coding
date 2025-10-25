@@ -48,6 +48,33 @@ pub struct CreateGroupReq {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct PublicJoinReq {
+    pub handle: String,
+}
+
+
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AddContactReq {
+    pub user_id: Uuid,
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow)]
+pub struct Contact {
+    pub user_id: Uuid,
+    pub contact_user_id: Uuid,
+    pub status: String, // "friend", "blocked"
+    pub added_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ContactDto {
+    pub user: User,
+    pub status: String,
+    pub added_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CreateChannelReq {
     pub title: String,
 }
@@ -182,12 +209,7 @@ pub struct SetVisibilityReq {
     pub public_handle: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct PublicJoinReq {
-    pub handle: String,
-}
-
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MessageAttachmentDto {
     pub id: Uuid,
     pub content_type: Option<String>,

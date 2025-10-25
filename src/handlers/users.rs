@@ -16,7 +16,7 @@ pub struct AvatarDto {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[post("/api/users/me/avatars")]
+#[post("/v1/api/users/me/avatars")]
 pub async fn upload_avatars(
     state: web::Data<AppState>,
     mut payload: Multipart,
@@ -48,7 +48,7 @@ pub struct SetPrimaryReq {
     pub avatar_id: Uuid,
 }
 
-#[post("/api/users/me/avatars/primary")]
+#[post("/v1/api/users/me/avatars/primary")]
 pub async fn set_primary(
     state: web::Data<AppState>,
     user: AuthUser,
@@ -78,7 +78,7 @@ pub async fn set_primary(
     Ok(HttpResponse::Ok().finish())
 }
 
-#[get("/api/users/{user_id}/avatars")]
+#[get("/v1/api/users/{user_id}/avatars")]
 pub async fn list_avatars(
     state: web::Data<AppState>,
     path: web::Path<Uuid>,
@@ -90,7 +90,7 @@ pub async fn list_avatars(
     Ok(HttpResponse::Ok().json(rows))
 }
 
-#[get("/api/users/search")]
+#[get("/v1/api/users/search")]
 pub async fn search_users(
     state: web::Data<AppState>,
     _user: AuthUser, // authenticated

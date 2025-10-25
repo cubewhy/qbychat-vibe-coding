@@ -43,6 +43,7 @@ async fn main() -> anyhow::Result<()> {
         admin_token: Arc::new(config.admin.token.clone()),
         typing: Arc::new(dashmap::DashMap::new()),
         presence: Arc::new(dashmap::DashMap::new()),
+        sequence_counter: Arc::new(std::sync::atomic::AtomicU64::new(0)),
     };
 
     info!("listening on {}", config.server.bind_addr);
