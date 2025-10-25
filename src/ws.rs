@@ -95,6 +95,14 @@ async fn handle_ws_text(state: &AppState, user_id: Uuid, txt: &str) -> anyhow::R
             }
 
             let mid = Uuid::new_v4();
+            // check mute
+            #[derive(sqlx::FromRow)]
+            struct MuteRow { muted_until: Option<chrono::DateTime<chrono::Utc>> }
+            if let Some(m) = sqlx::query_as::<_, MuteRow>("SELECT muted_until FROM chat_mutes WHERE chat_id = $1 AND user_id = $2")
+                .bind(chat_id).bind(user_id).fetch_optional(&state.pool).await? {
+                if let Some(until) = m.muted_until { if until > chrono::Utc::now() { send_ws_err(state, user_id, "muted"); return Ok(()); } }
+            }
+
             let saved = sqlx::query_as::<_, MessageRow>(
                 r#"INSERT INTO messages (id, chat_id, sender_id, content)
                    VALUES ($1, $2, $3, $4)

@@ -3,3 +3,4 @@ mod auth;
 mod chats;
 mod ws;
 mod groups;
+mod admins;

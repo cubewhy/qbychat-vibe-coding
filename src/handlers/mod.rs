@@ -10,5 +10,10 @@ pub fn config(cfg: &mut web::ServiceConfig) {
        .service(chats::create_group)
        .service(chats::create_channel)
        .service(chats::add_participant)
+       .service(chats::promote_admin)
+       .service(chats::demote_admin)
+       .service(chats::remove_participant)
+       .service(chats::mute_member)
+       .service(chats::unmute_member)
        .service(chats::list_messages);
 }

@@ -30,6 +30,15 @@ pub struct CreateChannelReq { pub title: String }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AddParticipantReq { pub username: String }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AdminReq { pub username: String }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MuteReq { pub username: String, pub minutes: i64 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UnmuteReq { pub username: String }
+
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct Chat { pub id: Uuid, pub is_direct: bool, pub created_at: DateTime<Utc> }
 
