@@ -7,6 +7,7 @@ pub mod files;
 pub mod uploads;
 pub mod admin;
 pub mod messages;
+pub mod members;
 
 pub fn config(cfg: &mut web::ServiceConfig) {
     cfg.service(auth::register)
@@ -33,5 +34,8 @@ pub fn config(cfg: &mut web::ServiceConfig) {
        .service(messages::delete_message)
        .service(messages::read_bulk)
        .service(messages::purge_reads)
-       .service(messages::unread_count);
+       .service(messages::unread_count)
+       .service(members::get_note)
+       .service(members::set_note)
+       .service(members::delete_note);
 }

@@ -3,6 +3,8 @@
 Base URL: http://localhost:8080
 Auth: Bearer JWT in Authorization header. For WebSocket, pass ?token=... or Authorization header.
 
+This project aims to be a lightweight Telegram-like clone.
+
 ## Auth
 
 ### POST /api/register
@@ -162,6 +164,19 @@ Response 200:
 - Cron purge
   - Deploy an external cron (e.g., host or container) to call POST /api/admin/storage/purge daily at 00:00.
 
+### Member Notes
+- GET /api/chats/{chat_id}/member/note -> {"note": string|null}
+- POST /api/chats/{chat_id}/member/note {"note":"string"} -> 200
+- DELETE /api/chats/{chat_id}/member/note -> 200
+  - Only chat members can manage their note.
+
+### Chat administration
+- POST /api/chats/{chat_id}/remove — kick a member (owner/admin only)
+- POST /api/chats/{chat_id}/leave — current user leaves the chat
+- POST /api/chats/{chat_id}/clear_messages —
+  - Direct chats: any participant can clear all messages
+  - Groups/Channels: only owner or admins can clear all messages
+
 ### Messages
 
 - POST /api/chats/{chat_id}/messages
@@ -180,15 +195,29 @@ Response 200:
   - POST /api/admin/reads/purge: delete message_reads_small older than 7 days
 
 ### Members & Unread
+
 - Member entity: chat_members(chat_id, user_id, note, last_read_message_id, created_at)
-  - 创建时机：用户加入聊天时（direct/group/channel），会插入 chat_members 记录。
-  - last_read_message_id 用于按消息时间计算未读数量；消息删除不计入未读。
+  - Creation time: when a user joins a chat (direct/group/channel), a row is inserted.
+  - last_read_message_id is used to compute unread counts by time; deleted messages are not counted.
 - GET /api/chats/{chat_id}/unread_count
-  - 返回 {"unread": number}
-  - 逻辑：
-    - 取成员 last_read_message_id 对应消息时间 T，如果为空则 T=最小时间
-    - 统计该聊天中 created_at > T 且 is_deleted=false 的消息数量
-- 批量标记已读会推进 chat_members.last_read_message_id 为该批最新消息
+  - Returns {"unread": number}
+  - Logic:
+    - Take T = created_at of last_read_message_id; if null, count from beginning
+    - Count messages in the chat with created_at > T AND is_deleted=false
+- Bulk read advances chat_members.last_read_message_id to the newest message in the batch
+
+### Member Notes
+- GET /api/chats/{chat_id}/member/note -> {"note": string|null}
+- POST /api/chats/{chat_id}/member/note {"note":"string"} -> 200
+- DELETE /api/chats/{chat_id}/member/note -> 200
+  - Only chat members can manage their note.
+
+### Chat administration
+- POST /api/chats/{chat_id}/remove — kick a member (owner/admin only)
+- POST /api/chats/{chat_id}/leave — current user leaves the chat
+- POST /api/chats/{chat_id}/clear_messages —
+  - Direct chats: any participant can clear all messages
+  - Groups/Channels: only owner or admins can clear all messages
 
 ## WebSocket
 

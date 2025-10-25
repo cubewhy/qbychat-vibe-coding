@@ -8,3 +8,4 @@ mod avatars;
 mod files;
 mod messages;
 mod members;
+mod clear;

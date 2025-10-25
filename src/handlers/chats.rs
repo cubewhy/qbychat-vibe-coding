@@ -125,8 +125,12 @@ pub async fn remove_participant(state: web::Data<AppState>, path: web::Path<Uuid
     let target = sqlx::query_as::<_, IdRow>("SELECT id FROM users WHERE username = $1")
         .bind(req.username.trim()).fetch_optional(&state.pool).await.map_err(internal_err)?
         .ok_or_else(|| actix_web::error::ErrorNotFound("user not found"))?;
+    let mut tx = state.pool.begin().await.map_err(internal_err)?;
     sqlx::query("DELETE FROM chat_participants WHERE chat_id = $1 AND user_id = $2")
-        .bind(chat_id).bind(target.id).execute(&state.pool).await.map_err(internal_err)?;
+        .bind(chat_id).bind(target.id).execute(&mut *tx).await.map_err(internal_err)?;
+    sqlx::query("DELETE FROM chat_members WHERE chat_id = $1 AND user_id = $2")
+        .bind(chat_id).bind(target.id).execute(&mut *tx).await.map_err(internal_err)?;
+    tx.commit().await.map_err(internal_err)?;
     Ok(HttpResponse::Ok().finish())
 }
 
@@ -168,6 +172,30 @@ pub async fn unmute_member(state: web::Data<AppState>, path: web::Path<Uuid>, re
     Ok(HttpResponse::Ok().finish())
 }
 
+#[post("/api/chats/{chat_id}/clear_messages")]
+pub async fn clear_messages(state: web::Data<AppState>, path: web::Path<Uuid>, user: AuthUser) -> actix_web::Result<HttpResponse> {
+    let chat_id = path.into_inner();
+    #[derive(sqlx::FromRow)]
+    struct Meta { is_direct: bool, chat_type: Option<String>, owner_id: Option<Uuid> }
+    let meta = sqlx::query_as::<_, Meta>("SELECT is_direct, chat_type, owner_id FROM chats WHERE id = $1")
+        .bind(chat_id).fetch_optional(&state.pool).await.map_err(internal_err)?
+        .ok_or_else(|| actix_web::error::ErrorNotFound("chat not found"))?;
+
+    let mut allowed = false;
+    if meta.is_direct {
+        allowed = sqlx::query_scalar::<_, Option<i64>>("SELECT 1 FROM chat_participants WHERE chat_id = $1 AND user_id = $2")
+            .bind(chat_id).bind(user.0).fetch_one(&state.pool).await.map_err(internal_err)?.is_some();
+    } else {
+        let is_admin = sqlx::query_scalar::<_, Option<i64>>("SELECT 1 FROM chat_roles WHERE chat_id = $1 AND user_id = $2 AND role='admin'")
+            .bind(chat_id).bind(user.0).fetch_one(&state.pool).await.map_err(internal_err)?.is_some();
+        allowed = meta.owner_id == Some(user.0) || is_admin;
+    }
+    if !allowed { return Ok(HttpResponse::Forbidden().finish()); }
+
+    sqlx::query("DELETE FROM messages WHERE chat_id = $1").bind(chat_id).execute(&state.pool).await.map_err(internal_err)?;
+    Ok(HttpResponse::Ok().finish())
+}
+
 #[get("/api/chats/{chat_id}/messages")]
 pub async fn list_messages(state: web::Data<AppState>, path: web::Path<Uuid>, user: AuthUser, q: web::Query<ListQuery>) -> actix_web::Result<HttpResponse> {
     let chat_id = path.into_inner();
@@ -201,6 +229,18 @@ pub async fn list_messages(state: web::Data<AppState>, path: web::Path<Uuid>, us
     };
 
     Ok(HttpResponse::Ok().json(rows))
+}
+
+#[post("/api/chats/{chat_id}/leave")]
+pub async fn leave_chat(state: web::Data<AppState>, path: web::Path<Uuid>, user: AuthUser) -> actix_web::Result<HttpResponse> {
+    let chat_id = path.into_inner();
+    let mut tx = state.pool.begin().await.map_err(internal_err)?;
+    sqlx::query("DELETE FROM chat_participants WHERE chat_id = $1 AND user_id = $2")
+        .bind(chat_id).bind(user.0).execute(&mut *tx).await.map_err(internal_err)?;
+    sqlx::query("DELETE FROM chat_members WHERE chat_id = $1 AND user_id = $2")
+        .bind(chat_id).bind(user.0).execute(&mut *tx).await.map_err(internal_err)?;
+    tx.commit().await.map_err(internal_err)?;
+    Ok(HttpResponse::Ok().finish())
 }
 
 pub async fn ensure_direct_chat(pool: &Pool<Postgres>, a: Uuid, b: Uuid) -> anyhow::Result<Uuid> {
