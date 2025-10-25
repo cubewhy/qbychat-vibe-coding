@@ -176,7 +176,7 @@ pub async fn list_messages(state: web::Data<AppState>, path: web::Path<Uuid>, us
     let limit = q.limit.unwrap_or(50).min(200) as i64;
     let rows = if let Some(before) = q.before {
         sqlx::query_as::<_, MessageRow>(
-            r#"SELECT id, chat_id, sender_id, content, created_at
+            r#"SELECT id, chat_id, sender_id, CASE WHEN is_deleted THEN '' ELSE content END as content, created_at
                FROM messages
                WHERE chat_id = $1 AND created_at < $2
                ORDER BY created_at DESC
@@ -185,7 +185,7 @@ pub async fn list_messages(state: web::Data<AppState>, path: web::Path<Uuid>, us
         .fetch_all(&state.pool).await.map_err(internal_err)?
     } else {
         sqlx::query_as::<_, MessageRow>(
-            r#"SELECT id, chat_id, sender_id, content, created_at
+            r#"SELECT id, chat_id, sender_id, CASE WHEN is_deleted THEN '' ELSE content END as content, created_at
                FROM messages
                WHERE chat_id = $1
                ORDER BY created_at DESC

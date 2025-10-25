@@ -162,6 +162,23 @@ Response 200:
 - Cron purge
   - Deploy an external cron (e.g., host or container) to call POST /api/admin/storage/purge daily at 00:00.
 
+### Messages
+
+- POST /api/chats/{chat_id}/messages
+  - Send a message in a chat you joined. Request: {"content":"string"}. Returns {"id":"uuid"}
+- POST /api/messages/{message_id}/edit
+  - Edit own message. Request: {"content":"string"}. 403 if not owner or message deleted. Sets edited_at.
+- POST /api/messages/{message_id}/delete
+  - Soft delete own message. Sets is_deleted=true, deleted_at=now(). Listing messages will return empty content for deleted ones.
+- POST /api/messages/read_bulk
+  - Bulk mark messages as read. Request: {"chat_id":"uuid","message_ids":["uuid",...]}
+  - Rules:
+    - channel: increments message_views.views and updates last_view_at
+    - direct or group with participants > 100: set message_reads_agg.is_read=true and first_read_at if null
+    - group with participants <= 100: upsert message_reads_small(message_id,user_id,read_at=now())
+- Admin
+  - POST /api/admin/reads/purge: delete message_reads_small older than 7 days
+
 ## WebSocket
 
 Path: /ws?token=...

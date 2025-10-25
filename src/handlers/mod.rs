@@ -6,6 +6,7 @@ pub mod users;
 pub mod files;
 pub mod uploads;
 pub mod admin;
+pub mod messages;
 
 pub fn config(cfg: &mut web::ServiceConfig) {
     cfg.service(auth::register)
@@ -26,5 +27,10 @@ pub fn config(cfg: &mut web::ServiceConfig) {
        .service(files::create_download_token)
        .service(files::download_file)
        .service(uploads::upload_files)
-       .service(admin::purge_storage);
+       .service(admin::purge_storage)
+       .service(messages::send_message)
+       .service(messages::edit_message)
+       .service(messages::delete_message)
+       .service(messages::read_bulk)
+       .service(messages::purge_reads);
 }
