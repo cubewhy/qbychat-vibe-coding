@@ -1,5 +1,4 @@
 use super::helpers::TestApp;
-use serde_json::json;
 
 #[tokio::test]
 async fn upload_dedup_by_sha256() -> anyhow::Result<()> {
@@ -12,63 +11,12 @@ async fn upload_dedup_by_sha256() -> anyhow::Result<()> {
     };
 
     // register two users
-    let token_a = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"fa","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let token_b = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"fb","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let token_a = app.register_user("fa").await?;
+    let token_b = app.register_user("fb").await?;
 
     // upload same bytes twice (no compression to keep identical)
-    let part1 = reqwest::multipart::Part::bytes(b"hello world".to_vec())
-        .file_name("a.bin")
-        .mime_str("application/octet-stream")
-        .unwrap();
-    let form1 = reqwest::multipart::Form::new().part("f1", part1);
-    let files1 = app
-        .client
-        .post(format!("{}/api/files", app.address))
-        .bearer_auth(&token_a)
-        .multipart(form1)
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
-    let id1 = files1[0]["id"].as_str().unwrap().to_string();
-
-    let part2 = reqwest::multipart::Part::bytes(b"hello world".to_vec())
-        .file_name("b.bin")
-        .mime_str("application/octet-stream")
-        .unwrap();
-    let form2 = reqwest::multipart::Form::new().part("f1", part2);
-    let files2 = app
-        .client
-        .post(format!("{}/api/files", app.address))
-        .bearer_auth(&token_b)
-        .multipart(form2)
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
-    let id2 = files2[0]["id"].as_str().unwrap().to_string();
+    let id1 = app.upload_file(&token_a, b"hello world".to_vec(), "a.bin", "application/octet-stream").await?;
+    let id2 = app.upload_file(&token_b, b"hello world".to_vec(), "b.bin", "application/octet-stream").await?;
 
     assert_eq!(id1, id2);
 
@@ -90,44 +38,16 @@ async fn admin_purge_unreferenced_files() -> anyhow::Result<()> {
             return Ok(());
         }
     };
-    let token = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"u","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let token = app.register_user("u").await?;
 
-    let part = reqwest::multipart::Part::bytes(b"temp".to_vec())
-        .file_name("t.bin")
-        .mime_str("application/octet-stream")
-        .unwrap();
-    let form = reqwest::multipart::Form::new().part("f1", part);
-    let _ = app
-        .client
-        .post(format!("{}/api/files", app.address))
-        .bearer_auth(&token)
-        .multipart(form)
-        .send()
-        .await?;
+    let _ = app.upload_file(&token, b"temp".to_vec(), "t.bin", "application/octet-stream").await?;
 
     let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM storage_files")
         .fetch_one(&app.pool)
         .await?;
     assert_eq!(before, 1);
 
-    let resp = app
-        .client
-        .post(format!("{}/api/admin/storage/purge", app.address))
-        .header("X-Admin-Token", "test_admin")
-        .send()
-        .await?;
-    assert!(resp.status().is_success());
+    app.purge_files().await?;
 
     let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM storage_files")
         .fetch_one(&app.pool)

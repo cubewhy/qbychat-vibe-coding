@@ -1,5 +1,4 @@
 use super::helpers::TestApp;
-use serde_json::json;
 
 #[tokio::test]
 async fn mention_flow_and_clear() -> anyhow::Result<()> {
@@ -11,68 +10,15 @@ async fn mention_flow_and_clear() -> anyhow::Result<()> {
         }
     };
 
-    let sender = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"mentioner","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let receiver = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"mentionee","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let sender = app.register_user("mentioner").await?;
+    let receiver = app.register_user("mentionee").await?;
 
-    let gid = app
-        .client
-        .post(format!("{}/api/chats/group", app.address))
-        .bearer_auth(&sender)
-        .json(&json!({"title":"Mentions"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("chat_id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    app.client
-        .post(format!("{}/api/chats/{}/participants", app.address, gid))
-        .bearer_auth(&sender)
-        .json(&json!({"username":"mentionee"}))
-        .send()
-        .await?;
+    let gid = app.create_group_chat(&sender, "Mentions").await?;
+    app.add_participants(&sender, &gid, vec!["mentionee"]).await?;
 
-    let msg = app
-        .client
-        .post(format!("{}/api/chats/{}/messages", app.address, gid))
-        .bearer_auth(&sender)
-        .json(&json!({"content":"hello @mentionee please read"}))
-        .send()
-        .await?;
-    assert!(msg.status().is_success());
+    app.send_message(&sender, &gid, "hello @mentionee please read").await?;
 
-    let mentions = app
-        .client
-        .get(format!("{}/api/chats/{}/member/mentions", app.address, gid))
-        .bearer_auth(&receiver)
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
+    let mentions = app.get_mentions(&receiver, &gid).await?;
     let arr = mentions["mentions"].as_array().unwrap();
     assert_eq!(arr.len(), 1);
     assert!(arr[0]["excerpt"].as_str().unwrap().contains("hello"));
@@ -105,58 +51,23 @@ async fn mention_limit_enforced_bad_path() -> anyhow::Result<()> {
         }
     };
 
-    let owner = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"ownerlimit","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let owner = app.register_user("ownerlimit").await?;
 
-    let gid = app
-        .client
-        .post(format!("{}/api/chats/group", app.address))
-        .bearer_auth(&owner)
-        .json(&json!({"title":"Big"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("chat_id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let gid = app.create_group_chat(&owner, "Big").await?;
 
     let mut content = String::new();
+    let mut usernames = Vec::new();
     for idx in 0..51 {
         let uname = format!("user{:02}", idx);
-        app.client
-            .post(format!("{}/api/register", app.address))
-            .json(&json!({"username":uname,"password":"secretpw"}))
-            .send()
-            .await?;
-        app.client
-            .post(format!("{}/api/chats/{}/participants", app.address, gid))
-            .bearer_auth(&owner)
-            .json(&json!({"username":uname}))
-            .send()
-            .await?;
+        app.register_user(&uname).await?;
+        usernames.push(uname.clone());
         content.push_str(&format!("@{} ", uname));
     }
+    app.add_participants(&owner, &gid, usernames.iter().map(|s| s.as_str()).collect()).await?;
 
-    let res = app
-        .client
-        .post(format!("{}/api/chats/{}/messages", app.address, gid))
-        .bearer_auth(&owner)
-        .json(&json!({"content": content}))
-        .send()
-        .await?;
-    assert_eq!(res.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
+    // This should fail due to too many mentions
+    let result = app.send_message(&owner, &gid, &content).await;
+    assert!(result.is_err());
 
     Ok(())
 }

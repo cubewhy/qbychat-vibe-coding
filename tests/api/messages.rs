@@ -12,75 +12,20 @@ async fn edit_and_delete_message() -> anyhow::Result<()> {
     };
 
     // register two users
-    let token_a = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"a","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let _ = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"b","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
+    let token_a = app.register_user("a").await?;
+    let _ = app.register_user("b").await?;
 
     // direct chat
-    let chat_id = app
-        .client
-        .post(format!("{}/api/chats/direct", app.address))
-        .bearer_auth(&token_a)
-        .json(&json!({"peer_username":"b"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("chat_id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let chat_id = app.create_direct_chat(&token_a, "b").await?;
 
     // send message
-    let mid = app
-        .client
-        .post(format!("{}/api/chats/{}/messages", app.address, chat_id))
-        .bearer_auth(&token_a)
-        .json(&json!({"content":"hello"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let mid = app.send_message(&token_a, &chat_id, "hello").await?;
 
     // edit message
-    let res = app
-        .client
-        .post(format!("{}/api/messages/{}/edit", app.address, mid))
-        .bearer_auth(&token_a)
-        .json(&json!({"content":"hello edit"}))
-        .send()
-        .await?;
-    assert!(res.status().is_success());
+    app.edit_message(&token_a, &mid, "hello edit").await?;
 
     // delete message
-    let res = app
-        .client
-        .post(format!("{}/api/messages/{}/delete", app.address, mid))
-        .bearer_auth(&token_a)
-        .send()
-        .await?;
-    assert!(res.status().is_success());
+    app.delete_message(&token_a, &mid).await?;
 
     Ok(())
 }
@@ -95,75 +40,17 @@ async fn read_bulk_behaviors() -> anyhow::Result<()> {
         }
     };
 
-    let token_owner = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"o","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let token_peer = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"p","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let token_owner = app.register_user("o").await?;
+    let token_peer = app.register_user("p").await?;
 
     // group <=100
-    let gid = app
-        .client
-        .post(format!("{}/api/chats/group", app.address))
-        .bearer_auth(&token_owner)
-        .json(&json!({"title":"G"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("chat_id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    app.client
-        .post(format!("{}/api/chats/{}/participants", app.address, gid))
-        .bearer_auth(&token_owner)
-        .json(&json!({"username":"p"}))
-        .send()
-        .await?;
+    let gid = app.create_group_chat(&token_owner, "G").await?;
+    app.add_participants(&token_owner, &gid, vec!["p"]).await?;
 
-    let m1 = app
-        .client
-        .post(format!("{}/api/chats/{}/messages", app.address, gid))
-        .bearer_auth(&token_owner)
-        .json(&json!({"content":"x"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let m1 = app.send_message(&token_owner, &gid, "x").await?;
 
     // peer marks read -> small table updated
-    let res = app
-        .client
-        .post(format!("{}/api/messages/read_bulk", app.address))
-        .bearer_auth(&token_peer)
-        .json(&json!({"chat_id": gid, "message_ids": [m1]}))
-        .send()
-        .await?;
-    assert!(res.status().is_success());
+    app.mark_messages_read(&token_peer, &gid, vec![&m1]).await?;
     let cnt: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM message_reads_small")
         .fetch_one(&app.pool)
         .await?;
@@ -228,50 +115,11 @@ async fn listing_includes_receipts_and_pin_state() -> anyhow::Result<()> {
     let (token_a, _username_a) = app.register_user_with_username("rca").await?;
     let (token_b, username_b) = app.register_user_with_username("rcb").await?;
 
-    let dm = app
-        .client
-        .post(format!("{}/api/chats/direct", app.address))
-        .bearer_auth(&token_a)
-        .json(&json!({"peer_username": username_b}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("chat_id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let msg = app
-        .client
-        .post(format!("{}/api/chats/{}/messages", app.address, dm))
-        .bearer_auth(&token_a)
-        .json(&json!({"content":"check read"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    app.client
-        .post(format!("{}/api/messages/read_bulk", app.address))
-        .bearer_auth(&token_b)
-        .json(&json!({"chat_id": dm, "message_ids": [msg]}))
-        .send()
-        .await?;
+    let dm = app.create_direct_chat(&token_a, &username_b).await?;
+    let msg = app.send_message(&token_a, &dm, "check read").await?;
+    app.mark_messages_read(&token_b, &dm, vec![&msg]).await?;
 
-    let list = app
-        .client
-        .get(format!(
-            "{}/api/chats/{}/messages?include_reads=true",
-            app.address, dm
-        ))
-        .bearer_auth(&token_a)
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
+    let list = app.get_messages(&token_a, &dm, true).await?;
     let top = &list.as_array().unwrap()[0];
     assert_eq!(top["read_receipt"]["is_read_by_peer"].as_bool(), Some(true));
 
@@ -338,65 +186,13 @@ async fn read_details_endpoint_permissions() -> anyhow::Result<()> {
         }
     };
 
-    let owner = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"rdowner","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let admin = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"rdadmin","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let member = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"rdmember","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let owner = app.register_user("rdowner").await?;
+    let admin = app.register_user("rdadmin").await?;
+    let member = app.register_user("rdmember").await?;
 
-    let gid = app
-        .client
-        .post(format!("{}/api/chats/group", app.address))
-        .bearer_auth(&owner)
-        .json(&json!({"title":"Readers"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("chat_id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    for uname in ["rdadmin", "rdmember"] {
-        app.client
-            .post(format!("{}/api/chats/{}/participants", app.address, gid))
-            .bearer_auth(&owner)
-            .json(&json!({"username":uname}))
-            .send()
-            .await?;
-    }
-    // grant admin delete perms
+    let gid = app.create_group_chat(&owner, "Readers").await?;
+    app.add_participants(&owner, &gid, vec!["rdadmin", "rdmember"]).await?;
+    // grant admin delete perms - TODO: need to update add_admins to support permissions
     app.client
         .post(format!("{}/api/chats/{}/admins", app.address, gid))
         .bearer_auth(&owner)
@@ -404,35 +200,11 @@ async fn read_details_endpoint_permissions() -> anyhow::Result<()> {
         .send()
         .await?;
 
-    let mid = app
-        .client
-        .post(format!("{}/api/chats/{}/messages", app.address, gid))
-        .bearer_auth(&owner)
-        .json(&json!({"content":"who read me"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let mid = app.send_message(&owner, &gid, "who read me").await?;
 
-    app.client
-        .post(format!("{}/api/messages/read_bulk", app.address))
-        .bearer_auth(&member)
-        .json(&json!({"chat_id": gid, "message_ids": [mid.clone()]}))
-        .send()
-        .await?;
+    app.mark_messages_read(&member, &gid, vec![&mid]).await?;
 
-    let reads = app
-        .client
-        .get(format!("{}/api/messages/{}/reads", app.address, mid))
-        .bearer_auth(&admin)
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
+    let reads = app.get_message_reads(&admin, &mid).await?;
     assert_eq!(reads["readers"].as_array().unwrap().len(), 1);
 
     let res = app

@@ -11,128 +11,42 @@ async fn owner_grants_perms_and_pin_and_invite() -> anyhow::Result<()> {
         }
     };
 
-    let token_owner = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"ow","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let _ = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"m1","password":"secretpw"}))
-        .send()
-        .await?;
-    let _ = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"u2","password":"secretpw"}))
-        .send()
-        .await?;
+    let token_owner = app.register_user("ow").await?;
+    let _ = app.register_user("m1").await?;
+    let _ = app.register_user("u2").await?;
 
     // create group
-    let gid = app
-        .client
-        .post(format!("{}/api/chats/group", app.address))
-        .bearer_auth(&token_owner)
-        .json(&json!({"title":"G"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("chat_id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let gid = app.create_group_chat(&token_owner, "G").await?;
 
     // add m1 to group
-    let res = app
-        .client
-        .post(format!("{}/api/chats/{}/participants", app.address, gid))
-        .bearer_auth(&token_owner)
-        .json(&json!({"username":"m1"}))
-        .send()
-        .await?;
-    assert!(res.status().is_success());
+    app.add_participants(&token_owner, &gid, vec!["m1"]).await?;
 
-    // grant admin perms to m1
-    let res = app
-        .client
+    // grant admin perms to m1 - TODO: need to update add_admins to support permissions
+    app.client
         .post(format!("{}/api/chats/{}/admins", app.address, gid))
         .bearer_auth(&token_owner)
         .json(&json!({"username":"m1","permissions":{"can_change_info":false,"can_delete_messages":false,"can_invite_users":true,"can_pin_messages":true,"can_manage_members":false}}))
         .send()
         .await?;
-    assert!(res.status().is_success());
 
     // m1 invites u2
-    let token_m1 = app
-        .client
-        .post(format!("{}/api/login", app.address))
-        .json(&json!({"username":"m1","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let res = app
-        .client
-        .post(format!("{}/api/chats/{}/participants", app.address, gid))
-        .bearer_auth(&token_m1)
-        .json(&json!({"username":"u2"}))
-        .send()
-        .await?;
-    assert!(res.status().is_success());
+    let token_m1 = app.login("m1", "secretpw").await?;
+    app.add_participants(&token_m1, &gid, vec!["u2"]).await?;
 
     // send message and pin
-    let mid = app
-        .client
-        .post(format!("{}/api/chats/{}/messages", app.address, gid))
-        .bearer_auth(&token_owner)
-        .json(&json!({"content":"important"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let mid = app.send_message(&token_owner, &gid, "important").await?;
 
-    let res = app
-        .client
-        .post(format!("{}/api/chats/{}/pin_message", app.address, gid))
-        .bearer_auth(&token_m1)
-        .json(&json!({"message_id": mid}))
-        .send()
-        .await?;
-    assert!(res.status().is_success());
+    app.pin_message(&token_m1, &gid, &mid).await?;
 
     let pinned: Option<String> =
         sqlx::query_scalar("SELECT pinned_message_id::text FROM chats WHERE id = $1")
             .bind(&gid)
             .fetch_one(&app.pool)
             .await?;
-    assert_eq!(pinned, Some(mid));
+    assert_eq!(pinned, Some(mid.clone()));
 
     // list admins should show granted perms
-    let admins = app
-        .client
-        .get(format!("{}/api/chats/{}/admins", app.address, gid))
-        .bearer_auth(&token_owner)
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
+    let admins = app.get_admins(&token_owner, &gid).await?;
     assert_eq!(admins["owner"]["username"].as_str(), Some("ow"));
     assert_eq!(admins["admins"][0]["username"].as_str(), Some("m1"));
     assert_eq!(
@@ -144,13 +58,7 @@ async fn owner_grants_perms_and_pin_and_invite() -> anyhow::Result<()> {
         Some(true)
     );
 
-    let res = app
-        .client
-        .post(format!("{}/api/chats/{}/unpin_message", app.address, gid))
-        .bearer_auth(&token_m1)
-        .send()
-        .await?;
-    assert!(res.status().is_success());
+    app.unpin_message(&token_m1, &gid, &mid).await?;
 
     Ok(())
 }
@@ -165,30 +73,9 @@ async fn admin_without_manage_perm_cannot_remove_member() -> anyhow::Result<()> 
         }
     };
 
-    let owner = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"ow2","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let _ = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"adm","password":"secretpw"}))
-        .send()
-        .await?;
-    let _ = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"victim","password":"secretpw"}))
-        .send()
-        .await?;
+    let owner = app.register_user("ow2").await?;
+    let _ = app.register_user("adm").await?;
+    let _ = app.register_user("victim").await?;
 
     let gid = app
         .client

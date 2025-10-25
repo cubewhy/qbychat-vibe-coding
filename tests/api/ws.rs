@@ -39,19 +39,7 @@ async fn websocket_send_and_receive() -> anyhow::Result<()> {
     let (token_bob, username_bob) = app.register_user_with_username("bob").await?;
 
     // create direct chat
-    let chat_id = app
-        .client
-        .post(format!("{}/api/chats/direct", app.address))
-        .bearer_auth(&token_alice)
-        .json(&json!({"peer_username": username_bob}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("chat_id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let chat_id = app.create_direct_chat(&token_alice, &username_bob).await?;
 
     // build ws url
     let ws_url = app.address.replace("http://", "ws://") + &format!("/ws?token={}", token_alice);
@@ -102,19 +90,7 @@ async fn websocket_typing_indicator() -> anyhow::Result<()> {
     let (token_bob, username_bob) = app.register_user_with_username("bob").await?;
 
     // create direct chat
-    let chat_id = app
-        .client
-        .post(format!("{}/api/chats/direct", app.address))
-        .bearer_auth(&token_alice)
-        .json(&json!({"peer_username": username_bob}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("chat_id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let chat_id = app.create_direct_chat(&token_alice, &username_bob).await?;
 
     // connect both sides
     let ws_url_a = app.address.replace("http://", "ws://") + &format!("/ws?token={}", token_alice);

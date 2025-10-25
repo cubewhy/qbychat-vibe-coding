@@ -1,5 +1,4 @@
 use super::helpers::TestApp;
-use serde_json::json;
 
 #[tokio::test]
 async fn forward_messages_preserves_metadata() -> anyhow::Result<()> {
@@ -11,96 +10,18 @@ async fn forward_messages_preserves_metadata() -> anyhow::Result<()> {
         }
     };
 
-    let sender = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"fw_sender","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let peer = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"fw_peer","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let sender = app.register_user("fw_sender").await?;
+    let peer = app.register_user("fw_peer").await?;
 
-    let source = app
-        .client
-        .post(format!("{}/api/chats/group", app.address))
-        .bearer_auth(&sender)
-        .json(&json!({"title":"Source"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("chat_id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    app.client
-        .post(format!("{}/api/chats/{}/participants", app.address, source))
-        .bearer_auth(&sender)
-        .json(&json!({"username":"fw_peer"}))
-        .send()
-        .await?;
+    let source = app.create_group_chat(&sender, "Source").await?;
+    app.add_participants(&sender, &source, vec!["fw_peer"]).await?;
 
-    let target = app
-        .client
-        .post(format!("{}/api/chats/group", app.address))
-        .bearer_auth(&peer)
-        .json(&json!({"title":"Target"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("chat_id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    app.client
-        .post(format!("{}/api/chats/{}/participants", app.address, target))
-        .bearer_auth(&peer)
-        .json(&json!({"username":"fw_sender"}))
-        .send()
-        .await?;
+    let target = app.create_group_chat(&peer, "Target").await?;
+    app.add_participants(&peer, &target, vec!["fw_sender"]).await?;
 
-    let msg = app
-        .client
-        .post(format!("{}/api/chats/{}/messages", app.address, source))
-        .bearer_auth(&sender)
-        .json(&json!({"content":"original text"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let msg = app.send_message(&sender, &source, "original text").await?;
 
-    let res = app
-        .client
-        .post(format!(
-            "{}/api/chats/{}/forward_messages",
-            app.address, target
-        ))
-        .bearer_auth(&sender)
-        .json(&json!({"from_chat_id": source, "message_ids": [msg]}))
-        .send()
-        .await?;
-    assert!(res.status().is_success());
+    app.forward_messages(&sender, &target, &source, vec![&msg]).await?;
 
     let list = app
         .client
@@ -133,83 +54,17 @@ async fn forward_bad_path_when_not_in_source() -> anyhow::Result<()> {
         }
     };
 
-    let sender = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"fw_bad","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let outsider = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"fw_out","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let sender = app.register_user("fw_bad").await?;
+    let outsider = app.register_user("fw_out").await?;
 
-    let source = app
-        .client
-        .post(format!("{}/api/chats/group", app.address))
-        .bearer_auth(&sender)
-        .json(&json!({"title":"Secret"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("chat_id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let msg = app
-        .client
-        .post(format!("{}/api/chats/{}/messages", app.address, source))
-        .bearer_auth(&sender)
-        .json(&json!({"content":"hidden"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let source = app.create_group_chat(&sender, "Secret").await?;
+    let msg = app.send_message(&sender, &source, "hidden").await?;
 
-    let target = app
-        .client
-        .post(format!("{}/api/chats/group", app.address))
-        .bearer_auth(&outsider)
-        .json(&json!({"title":"Other"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("chat_id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let target = app.create_group_chat(&outsider, "Other").await?;
 
-    let res = app
-        .client
-        .post(format!(
-            "{}/api/chats/{}/forward_messages",
-            app.address, target
-        ))
-        .bearer_auth(&outsider)
-        .json(&json!({"from_chat_id": source, "message_ids": [msg]}))
-        .send()
-        .await?;
-    assert_eq!(res.status(), reqwest::StatusCode::FORBIDDEN);
+    // This should fail since outsider is not in source chat
+    let result = app.forward_messages(&outsider, &target, &source, vec![&msg]).await;
+    assert!(result.is_err());
 
     Ok(())
 }

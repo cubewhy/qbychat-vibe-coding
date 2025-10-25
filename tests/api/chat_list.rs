@@ -1,5 +1,4 @@
 use super::helpers::TestApp;
-use serde_json::json;
 
 #[tokio::test]
 async fn chat_list_with_options_and_notify() -> anyhow::Result<()> {
@@ -11,67 +10,17 @@ async fn chat_list_with_options_and_notify() -> anyhow::Result<()> {
         }
     };
 
-    let token_a = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"la","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let token_b = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"lb","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let token_a = app.register_user("la").await?;
+    let token_b = app.register_user("lb").await?;
 
     // create dm and messages
-    let dm = app
-        .client
-        .post(format!("{}/api/chats/direct", app.address))
-        .bearer_auth(&token_a)
-        .json(&json!({"peer_username":"lb"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("chat_id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let dm = app.create_direct_chat(&token_a, "lb").await?;
 
     // message with mention of b
-    let _ = app
-        .client
-        .post(format!("{}/api/chats/{}/messages", app.address, dm))
-        .bearer_auth(&token_a)
-        .json(&json!({"content":"hi @lb"}))
-        .send()
-        .await?;
+    app.send_message(&token_a, &dm, "hi @lb").await?;
 
     // list with options
-    let list = app
-        .client
-        .get(format!(
-            "{}/api/chats?include_unread=true&include_first=true",
-            app.address
-        ))
-        .bearer_auth(&token_b)
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
+    let list = app.get_chat_list(&token_b, true, true).await?;
     assert!(list.as_array().unwrap().len() >= 1);
     let item = &list.as_array().unwrap()[0];
     assert!(item.get("unread").is_some());
@@ -79,45 +28,18 @@ async fn chat_list_with_options_and_notify() -> anyhow::Result<()> {
 
     // set notify settings
     let until = (chrono::Utc::now() + chrono::Duration::days(1)).to_rfc3339();
-    let res = app
-        .client
-        .post(format!("{}/api/chats/{}/member/notify", app.address, dm))
-        .bearer_auth(&token_b)
-        .json(&json!({"mute_forever": false, "mute_until": until, "notify_type":"mentions_only"}))
-        .send()
-        .await?;
-    assert!(res.status().is_success());
+    app.set_notify_settings(&token_b, &dm, false, Some(&until), "mentions_only").await?;
 
     // get notify settings
-    let got = app
-        .client
-        .get(format!("{}/api/chats/{}/member/notify", app.address, dm))
-        .bearer_auth(&token_b)
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
+    let got = app.get_notify_settings(&token_b, &dm).await?;
     assert_eq!(got["notify_type"].as_str(), Some("mentions_only"));
 
     // mentions list
-    let mention_ids = app
-        .client
-        .get(format!("{}/api/chats/{}/member/mentions", app.address, dm))
-        .bearer_auth(&token_b)
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
+    let mention_ids = app.get_mention_ids(&token_b, &dm).await?;
     assert!(mention_ids["message_ids"].as_array().unwrap().len() >= 1);
 
     // clear mentions
-    let res = app
-        .client
-        .delete(format!("{}/api/chats/{}/member/mentions", app.address, dm))
-        .bearer_auth(&token_b)
-        .send()
-        .await?;
-    assert!(res.status().is_success());
+    app.clear_mentions(&token_b, &dm).await?;
 
     Ok(())
 }

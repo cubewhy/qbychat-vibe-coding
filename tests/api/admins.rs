@@ -1,5 +1,4 @@
 use super::helpers::TestApp;
-use serde_json::json;
 
 #[tokio::test]
 async fn promote_demote_remove_and_mute_flow() -> anyhow::Result<()> {
@@ -11,102 +10,28 @@ async fn promote_demote_remove_and_mute_flow() -> anyhow::Result<()> {
         }
     };
 
-    let token_owner = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"owner","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let _ = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"alice","password":"secretpw"}))
-        .send()
-        .await?;
+    let token_owner = app.register_user("owner").await?;
+    let _ = app.register_user("alice").await?;
 
-    let chat_id = app
-        .client
-        .post(format!("{}/api/chats/group", app.address))
-        .bearer_auth(&token_owner)
-        .json(&json!({"title":"Group"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("chat_id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let chat_id = app.create_group_chat(&token_owner, "Group").await?;
 
     // add alice
-    app.client
-        .post(format!(
-            "{}/api/chats/{}/participants",
-            app.address, chat_id
-        ))
-        .bearer_auth(&token_owner)
-        .json(&json!({"username":"alice"}))
-        .send()
-        .await?;
+    app.add_participants(&token_owner, &chat_id, vec!["alice"]).await?;
 
     // promote alice to admin
-    let res = app
-        .client
-        .post(format!("{}/api/chats/{}/admins", app.address, chat_id))
-        .bearer_auth(&token_owner)
-        .json(&json!({"username":"alice"}))
-        .send()
-        .await?;
-    assert!(res.status().is_success());
+    app.add_admins(&token_owner, &chat_id, vec!["alice"]).await?;
 
     // mute alice 1 minute
-    let res = app
-        .client
-        .post(format!("{}/api/chats/{}/mute", app.address, chat_id))
-        .bearer_auth(&token_owner)
-        .json(&json!({"username":"alice","minutes":1}))
-        .send()
-        .await?;
-    assert!(res.status().is_success());
+    app.mute_user(&token_owner, &chat_id, "alice", 1).await?;
 
     // unmute alice
-    let res = app
-        .client
-        .post(format!("{}/api/chats/{}/unmute", app.address, chat_id))
-        .bearer_auth(&token_owner)
-        .json(&json!({"username":"alice"}))
-        .send()
-        .await?;
-    assert!(res.status().is_success());
+    app.unmute_user(&token_owner, &chat_id, "alice").await?;
 
     // demote alice
-    let res = app
-        .client
-        .post(format!(
-            "{}/api/chats/{}/admins/remove",
-            app.address, chat_id
-        ))
-        .bearer_auth(&token_owner)
-        .json(&json!({"username":"alice"}))
-        .send()
-        .await?;
-    assert!(res.status().is_success());
+    app.remove_admin(&token_owner, &chat_id, "alice").await?;
 
     // remove member
-    let res = app
-        .client
-        .post(format!("{}/api/chats/{}/remove", app.address, chat_id))
-        .bearer_auth(&token_owner)
-        .json(&json!({"username":"alice"}))
-        .send()
-        .await?;
-    assert!(res.status().is_success());
+    app.remove_participants(&token_owner, &chat_id, vec!["alice"]).await?;
 
     Ok(())
 }

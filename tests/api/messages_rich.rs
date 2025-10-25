@@ -1,5 +1,4 @@
 use super::helpers::TestApp;
-use serde_json::json;
 
 #[tokio::test]
 async fn send_with_attachment_and_reply_and_list() -> anyhow::Result<()> {
@@ -11,83 +10,19 @@ async fn send_with_attachment_and_reply_and_list() -> anyhow::Result<()> {
         }
     };
 
-    let token_a = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"ra","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let token_b = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"rb","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let token_a = app.register_user("ra").await?;
+    let token_b = app.register_user("rb").await?;
 
-    let chat_id = app
-        .client
-        .post(format!("{}/api/chats/direct", app.address))
-        .bearer_auth(&token_a)
-        .json(&json!({"peer_username":"rb"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("chat_id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let chat_id = app.create_direct_chat(&token_a, "rb").await?;
 
     // upload a file
-    let part = reqwest::multipart::Part::bytes(b"data".to_vec())
-        .file_name("a.bin")
-        .mime_str("application/octet-stream")
-        .unwrap();
-    let form = reqwest::multipart::Form::new().part("f1", part);
-    let files = app
-        .client
-        .post(format!("{}/api/files", app.address))
-        .bearer_auth(&token_a)
-        .multipart(form)
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
-    let fid = files[0]["id"].as_str().unwrap().to_string();
+    let fid = app.upload_file(&token_a, b"data".to_vec(), "a.bin", "application/octet-stream").await?;
 
     // send base message
-    let m1 = app
-        .client
-        .post(format!("{}/api/chats/{}/messages", app.address, chat_id))
-        .bearer_auth(&token_a)
-        .json(&json!({"content":"base"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
-    let mid1 = m1["id"].as_str().unwrap().to_string();
+    let mid1 = app.send_message(&token_a, &chat_id, "base").await?;
 
     // send reply with attachment
-    let m2 = app
-        .client
-        .post(format!("{}/api/chats/{}/messages", app.address, chat_id))
-        .bearer_auth(&token_b)
-        .json(&json!({"content":"see file","attachment_ids":[fid],"reply_to_message_id": mid1}))
-        .send()
-        .await?;
-    assert!(m2.status().is_success());
+    app.send_message_with_attachments(&token_b, &chat_id, "see file", vec![&fid], Some(&mid1)).await?;
 
     // verify attachment row exists
     let cnt: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM message_attachments")

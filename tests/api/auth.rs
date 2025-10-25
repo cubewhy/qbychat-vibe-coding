@@ -1,5 +1,4 @@
 use super::helpers::TestApp;
-use serde_json::json;
 
 #[tokio::test]
 async fn register_and_login() -> anyhow::Result<()> {
@@ -11,23 +10,11 @@ async fn register_and_login() -> anyhow::Result<()> {
         }
     };
 
-    let res = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"alice","password":"secretpw"}))
-        .send()
-        .await?;
-    assert!(res.status().is_success());
-    let v: serde_json::Value = res.json().await?;
-    assert!(v.get("token").is_some());
+    let token = app.register_user("alice").await?;
+    assert!(!token.is_empty());
 
-    let res = app
-        .client
-        .post(format!("{}/api/login", app.address))
-        .json(&json!({"username":"alice","password":"secretpw"}))
-        .send()
-        .await?;
-    assert!(res.status().is_success());
+    let login_token = app.login("alice", "secretpw").await?;
+    assert!(!login_token.is_empty());
 
     Ok(())
 }

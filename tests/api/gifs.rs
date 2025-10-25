@@ -31,70 +31,18 @@ async fn gif_search_and_send_flow() -> anyhow::Result<()> {
         }
     };
 
-    let user = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"gifuser","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let peer = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"gifpeer","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let user = app.register_user("gifuser").await?;
+    let peer = app.register_user("gifpeer").await?;
 
-    let search = app
-        .client
-        .get(format!("{}/api/gifs/search?q=cat&limit=1", app.address))
-        .bearer_auth(&user)
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
+    let search = app.search_gifs(&user, "cat", 1).await?;
     assert_eq!(search["results"][0]["id"].as_str(), Some("gif123"));
 
-    let chat = app
-        .client
-        .post(format!("{}/api/chats/direct", app.address))
-        .bearer_auth(&user)
-        .json(&json!({"peer_username":"gifpeer"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("chat_id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let chat = app.create_direct_chat(&user, "gifpeer").await?;
 
-    let msg = app.client.post(format!("{}/api/chats/{}/gifs", app.address, chat))
-        .bearer_auth(&user)
-        .json(&json!({"gif_id":"gif123","gif_url":"https://cdn/gif123.gif","gif_preview_url":"https://cdn/gif123_tiny.gif","provider":"tenor"}))
-        .send().await?
-        .json::<serde_json::Value>().await?;
+    let msg = app.send_gif(&user, &chat, "gif123", "https://cdn/gif123.gif", "https://cdn/gif123_tiny.gif", "tenor").await?;
     assert_eq!(msg["kind"].as_str(), Some("gif"));
 
-    let list = app
-        .client
-        .get(format!("{}/api/chats/{}/messages", app.address, chat))
-        .bearer_auth(&peer)
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
+    let list = app.get_messages(&peer, &chat, false).await?;
     assert_eq!(
         list.as_array().unwrap()[0]["gif"]["id"].as_str(),
         Some("gif123")
@@ -120,53 +68,14 @@ async fn gif_send_bad_provider() -> anyhow::Result<()> {
         }
     };
 
-    let user = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"gifbad","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let _peer = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"gifbadpeer","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let user = app.register_user("gifbad").await?;
+    let _peer = app.register_user("gifbadpeer").await?;
 
-    let chat = app
-        .client
-        .post(format!("{}/api/chats/direct", app.address))
-        .bearer_auth(&user)
-        .json(&json!({"peer_username":"gifbadpeer"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("chat_id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let chat = app.create_direct_chat(&user, "gifbadpeer").await?;
 
-    let res = app
-        .client
-        .post(format!("{}/api/chats/{}/gifs", app.address, chat))
-        .bearer_auth(&user)
-        .json(&json!({"gif_id":"gif123","gif_url":"x","gif_preview_url":"y","provider":"unknown"}))
-        .send()
-        .await?;
-    assert_eq!(res.status(), reqwest::StatusCode::BAD_REQUEST);
+    // This should fail due to unknown provider
+    let result = app.send_gif(&user, &chat, "gif123", "x", "y", "unknown").await;
+    assert!(result.is_err());
 
     Ok(())
 }

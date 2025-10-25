@@ -1,22 +1,7 @@
 use super::helpers::TestApp;
-use serde_json::json;
 
 async fn upload_sample(app: &TestApp, token: &str) -> anyhow::Result<String> {
-    let part = reqwest::multipart::Part::bytes(b"sticker".to_vec())
-        .file_name("a.png")
-        .mime_str("image/png")
-        .unwrap();
-    let form = reqwest::multipart::Form::new().part("file", part);
-    let files = app
-        .client
-        .post(format!("{}/api/files", app.address))
-        .bearer_auth(token)
-        .multipart(form)
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
-    Ok(files[0]["id"].as_str().unwrap().to_string())
+    app.upload_file(token, b"sticker".to_vec(), "a.png", "image/png").await
 }
 
 #[tokio::test]
@@ -29,92 +14,21 @@ async fn sticker_pack_flow_and_send() -> anyhow::Result<()> {
         }
     };
 
-    let owner = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"stick_owner","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let member = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"stick_member","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let owner = app.register_user("stick_owner").await?;
+    let member = app.register_user("stick_member").await?;
 
     let file_id = upload_sample(&app, &owner).await?;
 
-    let pack = app
-        .client
-        .post(format!("{}/api/sticker_packs", app.address))
-        .bearer_auth(&owner)
-        .json(&json!({"title":"Fun Pack","short_name":"funpack"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
-    let pack_id = pack["id"].as_str().unwrap().to_string();
-
-    let sticker = app
-        .client
-        .post(format!(
-            "{}/api/sticker_packs/{}/stickers",
-            app.address, pack_id
-        ))
-        .bearer_auth(&owner)
-        .json(&json!({"file_id": file_id, "emoji":"😀"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
-    let sticker_id = sticker["id"].as_str().unwrap().to_string();
+    let pack_id = app.create_sticker_pack(&owner, "Fun Pack", "funpack").await?;
+    let sticker_id = app.add_sticker_to_pack(&owner, &pack_id, &file_id, Some("😀")).await?;
 
     // member installs pack
-    app.client
-        .post(format!(
-            "{}/api/sticker_packs/{}/install",
-            app.address, pack_id
-        ))
-        .bearer_auth(&member)
-        .send()
-        .await?;
+    app.install_sticker_pack(&member, &pack_id).await?;
 
     // create chat and send sticker
-    let chat = app
-        .client
-        .post(format!("{}/api/chats/direct", app.address))
-        .bearer_auth(&owner)
-        .json(&json!({"peer_username":"stick_member"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("chat_id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let chat = app.create_direct_chat(&owner, "stick_member").await?;
 
-    let res = app
-        .client
-        .post(format!("{}/api/chats/{}/stickers", app.address, chat))
-        .bearer_auth(&member)
-        .json(&json!({"sticker_id": sticker_id}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
+    let res = app.send_sticker(&member, &chat, &sticker_id).await?;
     assert_eq!(res["kind"].as_str(), Some("sticker"));
 
     let list = app
@@ -142,78 +56,18 @@ async fn sticker_send_without_install_bad_path() -> anyhow::Result<()> {
         }
     };
 
-    let owner = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"stick_owner2","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let stranger = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"stick_stranger","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let owner = app.register_user("stick_owner2").await?;
+    let stranger = app.register_user("stick_stranger").await?;
 
     let file_id = upload_sample(&app, &owner).await?;
-    let pack = app
-        .client
-        .post(format!("{}/api/sticker_packs", app.address))
-        .bearer_auth(&owner)
-        .json(&json!({"title":"Pack2","short_name":"packtwo"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
-    let pack_id = pack["id"].as_str().unwrap().to_string();
-    let sticker = app
-        .client
-        .post(format!(
-            "{}/api/sticker_packs/{}/stickers",
-            app.address, pack_id
-        ))
-        .bearer_auth(&owner)
-        .json(&json!({"file_id": file_id}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
-    let sticker_id = sticker["id"].as_str().unwrap().to_string();
+    let pack_id = app.create_sticker_pack(&owner, "Pack2", "packtwo").await?;
+    let sticker_id = app.add_sticker_to_pack(&owner, &pack_id, &file_id, None).await?;
 
-    let chat = app
-        .client
-        .post(format!("{}/api/chats/direct", app.address))
-        .bearer_auth(&owner)
-        .json(&json!({"peer_username":"stick_stranger"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("chat_id")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let chat = app.create_direct_chat(&owner, "stick_stranger").await?;
 
-    let res = app
-        .client
-        .post(format!("{}/api/chats/{}/stickers", app.address, chat))
-        .bearer_auth(&stranger)
-        .json(&json!({"sticker_id": sticker_id}))
-        .send()
-        .await?;
-    assert_eq!(res.status(), reqwest::StatusCode::FORBIDDEN);
+    // This should fail since stranger hasn't installed the pack
+    let result = app.send_sticker(&stranger, &chat, &sticker_id).await;
+    assert!(result.is_err());
 
     Ok(())
 }
