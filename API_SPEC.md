@@ -396,16 +396,24 @@ Path: /ws?token=...
 Client -> Server messages (JSON):
 
 - {"type":"send_message","chat_id":"uuid","content":"string"}
+- {"type":"start_typing","chat_id":"uuid"}
+- {"type":"mark_as_read","chat_id":"uuid","last_read_message_id":"uuid"}
 
 Server -> Client messages (JSON):
 
-- {"type":"message","message": Message}
+- {"type":"new_message","message": Message}
 - {"type":"error","message": string}
+- {"type":"typing_indicator","chat_id":"uuid","user":{"id":"uuid","username":"string"}}
+- {"type":"message_edited","message": Message}
+- {"type":"message_deleted","chat_id":"uuid","message_ids":["uuid",...]}
+- {"type":"messages_read","chat_id":"uuid","reader_user_id":"uuid","last_read_message_id":"uuid","read_count":number|null,"is_read_by_peer":bool|null}
+- {"type":"presence_update","user_id":"uuid","status":"online|offline","last_seen_at":"RFC3339|null"}
+- {"type":"chat_action","chat_id":"uuid","action_type":"string","data":{...}}
 
 Notes:
 
-- Server broadcasts message to all chat participants with active WS connections.
-- Use HTTP API to fetch history.
+- Server broadcasts events to relevant chat participants with active WS connections.
+- Use HTTP API to fetch history and initial state.
 
 ### WebSocket Real-Time Experience Module Detailed Design Specification
 
