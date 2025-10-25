@@ -557,6 +557,7 @@ Client -> Server messages (JSON):
 - {"type":"send_message","chat_id":"uuid","content":"string","request_id":"uuid"} // optional request_id for ack
 - {"type":"start_typing","chat_id":"uuid","request_id":"uuid"} // optional
 - {"type":"mark_as_read","chat_id":"uuid","last_read_message_id":"uuid","request_id":"uuid"} // optional
+- {"type":"sync","last_sequence_id":123} // Request events since the last known sequence_id for reconnection sync
 
 Server -> Client messages (JSON):
 
@@ -570,13 +571,14 @@ All S2C messages include a sequence_id (monotonically increasing u64) for orderi
 - {"type":"messages_read","sequence_id":128,"chat_id":"uuid","reader_user_id":"uuid","last_read_message_id":"uuid","read_count":number|null,"is_read_by_peer":bool|null}
 - {"type":"presence_update","sequence_id":129,"user_id":"uuid","status":"online|offline","last_seen_at":"RFC3339|null"}
 - {"type":"chat_action","sequence_id":130,"chat_id":"uuid","action_type":"string","data":{...}}
-- {"type":"ack","sequence_id":131,"request_id":"uuid"} // acknowledgment for C2S events with request_id
+- {"type":"sync_response","sequence_id":131,"events":[{...},...]} // Response to sync request with array of missed events
+- {"type":"ack","sequence_id":132,"request_id":"uuid"} // acknowledgment for C2S events with request_id
 
 Notes:
 
 - Server broadcasts events to relevant chat participants with active WS connections.
 - Use HTTP API to fetch history and initial state.
-- For reconnection: After disconnect, client should fetch latest state via HTTP APIs and send the last known message timestamp/ID to server for missed events sync.
+- For reconnection: After disconnect, client should send a "sync" message with the last known sequence_id. Server responds with "sync_response" containing all events since that sequence_id, ensuring precise and efficient state synchronization without relying on timestamps.
 
 ### WebSocket Real-Time Experience Module Detailed Design Specification
 

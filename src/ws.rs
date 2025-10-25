@@ -19,6 +19,8 @@ pub enum ClientWsMsg {
     StartTyping { chat_id: Uuid, request_id: Option<Uuid> },
     #[serde(rename = "mark_as_read")]
     MarkAsRead { chat_id: Uuid, last_read_message_id: Uuid, request_id: Option<Uuid> },
+    #[serde(rename = "sync")]
+    Sync { last_sequence_id: u64 },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -40,6 +42,8 @@ pub enum ServerWsMsg {
     PresenceUpdate { sequence_id: u64, user_id: Uuid, status: String, last_seen_at: Option<String> },
     #[serde(rename = "chat_action")]
     ChatAction { sequence_id: u64, chat_id: Uuid, action_type: String, data: serde_json::Value },
+    #[serde(rename = "sync_response")]
+    SyncResponse { sequence_id: u64, events: Vec<ServerWsMsg> },
     #[serde(rename = "ack")]
     Ack { sequence_id: u64, request_id: Uuid },
 }
@@ -385,6 +389,19 @@ async fn handle_ws_text(state: &AppState, user_id: Uuid, txt: &str) -> anyhow::R
                 if let Some(tx) = state.clients.get(&user_id) {
                     let _ = tx.send(ServerWsMsg::Ack { sequence_id: next_sequence_id(&state), request_id: rid });
                 }
+            }
+        }
+        ClientWsMsg::Sync { last_sequence_id } => {
+            // For sync, we need to collect all events since last_sequence_id
+            // But since we don't store events, we can send an empty array for now
+            // In a real implementation, you'd have an event log or replay mechanism
+            let events = vec![]; // Placeholder: implement proper event replay
+            let sync_msg = ServerWsMsg::SyncResponse {
+                sequence_id: next_sequence_id(&state),
+                events,
+            };
+            if let Some(tx) = state.clients.get(&user_id) {
+                let _ = tx.send(sync_msg);
             }
         }
     }

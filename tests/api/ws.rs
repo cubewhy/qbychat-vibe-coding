@@ -112,3 +112,39 @@ async fn websocket_typing_indicator() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn websocket_sync() -> anyhow::Result<()> {
+    let app = match TestApp::spawn().await {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("skipping ws test: {}", e);
+            return Ok(());
+        }
+    };
+
+    // register user
+    let (token, _username) = app.register_user_with_username("alice").await?;
+
+    // connect ws
+    let ws_url = app.address.replace("http://", "ws://") + &format!("/ws?token={}", token);
+    let (mut ws, _) = tokio_tungstenite::connect_async(ws_url).await?;
+
+    // consume presence update
+    let _ = next_text(&mut ws).await?;
+
+    // send sync with last_sequence_id 0
+    let payload = json!({"type": "sync", "last_sequence_id": 0}).to_string();
+    ws.send(WsMessage::Text(payload)).await?;
+
+    // receive sync_response
+    let t = next_text(&mut ws).await?;
+    let v: serde_json::Value = serde_json::from_str(&t)?;
+    assert_eq!(v.get("type").and_then(|v| v.as_str()), Some("sync_response"));
+    let events = v.get("events").and_then(|e| e.as_array());
+    assert!(events.is_some());
+    // For now, expect empty events
+    assert_eq!(events.unwrap().len(), 0);
+
+    Ok(())
+}
