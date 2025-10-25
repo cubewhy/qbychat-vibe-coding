@@ -26,7 +26,7 @@ pub enum ServerWsMsg {
     #[serde(rename = "new_message")]
     NewMessage { message: MessageRow },
     #[serde(rename = "error")]
-    Error { message: String },
+    Error { code: String, message: String },
     #[serde(rename = "typing_indicator")]
     TypingIndicator { chat_id: Uuid, user: UserInfo },
     #[serde(rename = "message_edited")]
@@ -171,7 +171,7 @@ async fn handle_ws_text(state: &AppState, user_id: Uuid, txt: &str) -> anyhow::R
                     .fetch_optional(&state.pool)
                     .await?;
             if is_member.is_none() {
-                send_ws_err(state, user_id, "not a member");
+                send_ws_err(state, user_id, "forbidden", "not a member");
                 return Ok(());
             }
 
@@ -188,7 +188,7 @@ async fn handle_ws_text(state: &AppState, user_id: Uuid, txt: &str) -> anyhow::R
                     .await?
                     .ok_or_else(|| anyhow::anyhow!("chat not found"))?;
             if meta.chat_type == "channel" && meta.owner_id != Some(user_id) {
-                send_ws_err(state, user_id, "only owner can send in channel");
+                send_ws_err(state, user_id, "forbidden", "only owner can send in channel");
                 return Ok(());
             }
 
@@ -208,7 +208,7 @@ async fn handle_ws_text(state: &AppState, user_id: Uuid, txt: &str) -> anyhow::R
             {
                 if let Some(until) = m.muted_until {
                     if until > chrono::Utc::now() {
-                        send_ws_err(state, user_id, "muted");
+                        send_ws_err(state, user_id, "forbidden", "muted");
                         return Ok(());
                     }
                 }
@@ -383,9 +383,10 @@ async fn handle_ws_text(state: &AppState, user_id: Uuid, txt: &str) -> anyhow::R
     Ok(())
 }
 
-fn send_ws_err(state: &AppState, user_id: Uuid, msg: &str) {
+fn send_ws_err(state: &AppState, user_id: Uuid, code: &str, msg: &str) {
     if let Some(tx) = state.clients.get(&user_id) {
         let _ = tx.send(ServerWsMsg::Error {
+            code: code.to_string(),
             message: msg.to_string(),
         });
     }

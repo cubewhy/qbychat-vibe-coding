@@ -1,4 +1,5 @@
 use crate::auth::{internal_err, AuthUser};
+use crate::models::User;
 use crate::state::AppState;
 use crate::upload::{save_part, CompressOpts};
 use actix_multipart::Multipart;
@@ -86,5 +87,27 @@ pub async fn list_avatars(
     let rows = sqlx::query_as::<_, AvatarDto>(
         "SELECT id, content_type, is_primary, created_at FROM user_avatars WHERE user_id = $1 ORDER BY created_at DESC"
     ).bind(user_id).fetch_all(&state.pool).await.map_err(internal_err)?;
+    Ok(HttpResponse::Ok().json(rows))
+}
+
+#[get("/api/users/search")]
+pub async fn search_users(
+    state: web::Data<AppState>,
+    _user: AuthUser, // authenticated
+    q: web::Query<std::collections::HashMap<String, String>>,
+) -> actix_web::Result<HttpResponse> {
+    let query = q.get("username").map_or("", |v| v).trim();
+    if query.is_empty() {
+        return Ok(HttpResponse::Ok().json(Vec::<User>::new()));
+    }
+    let limit = q.get("limit").and_then(|v| v.parse().ok()).unwrap_or(20);
+    let rows = sqlx::query_as::<_, User>(
+        "SELECT id, username, bio, is_online, last_seen_at, online_status_visibility, created_at FROM users WHERE username ILIKE $1 ORDER BY username LIMIT $2"
+    )
+    .bind(format!("{}%", query))
+    .bind(limit as i64)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(internal_err)?;
     Ok(HttpResponse::Ok().json(rows))
 }

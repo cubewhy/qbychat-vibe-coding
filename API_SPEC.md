@@ -7,6 +7,17 @@ This project aims to be a lightweight Telegram-like clone.
 
 ## Objects
 
+### User Object
+{
+  "id": "uuid",
+  "username": "string",
+  "bio": "string|null",
+  "is_online": bool,
+  "last_seen_at": "RFC3339|null",
+  "online_status_visibility": "everyone" | "contacts" | "nobody",
+  "created_at": "RFC3339"
+}
+
 ### Chat Object
 {
   "id": "uuid",
@@ -25,7 +36,7 @@ This project aims to be a lightweight Telegram-like clone.
 {
   "id": "uuid",
   "chat_id": "uuid",
-  "sender": {"id": "uuid", "username": "string"},
+  "sender": UserObject (lightweight, without bio),
   "content": "string",
   "created_at": "RFC3339",
   "edited_at": "RFC3339|null",
@@ -48,6 +59,8 @@ This project aims to be a lightweight Telegram-like clone.
 
 ## Auth
 
+Rate limiting: POST /api/register and POST /api/login are rate limited to prevent abuse (e.g., 5 attempts per minute per IP).
+
 ### POST /api/register
 
 Request:
@@ -59,19 +72,23 @@ Request:
 Response 200:
 {
 "token": "jwt",
+"refresh_token": "string",
 "user": {"id":"uuid","username":"string","created_at":"RFC3339"}
 }
 
 409: username exists
 400: invalid payload
 
-### POST /api/login
+## Users
 
-Request:
-{"username":"string","password":"string"}
+### GET /api/users/search?username=query&limit=20
 
-Response 200: same as /api/register
-401: unauthorized
+Search users by username prefix. Authenticated users only.
+
+Response 200:
+[
+  {"id":"uuid","username":"string","bio":"string|null","is_online":bool,"last_seen_at":"RFC3339|null"}
+]
 
 ## Chats
 
@@ -118,7 +135,7 @@ Add a participant by user_id. Owner or admin with `can_invite_users` can add.
 Request:
 {"user_id":"uuid"}
 
-Response 200: empty
+Response 204: No Content
 403: forbidden
 404: user or chat not found
 
@@ -202,68 +219,62 @@ Response 200:
 
 403: not a participant
 
-### DELETE /api/chats/{chat_id}/admins
+### DELETE /api/chats/{chat_id}/admins/{user_id}
 
 Demote an admin. Only owner can do this.
 
-Request:
-{"user_id":"uuid"}
-
-Response 200: empty
+Response 204: No Content
 403: forbidden
 404: user not found
 
-### DELETE /api/chats/{chat_id}/participants
+### DELETE /api/chats/{chat_id}/participants/{user_id}
 
 Remove a participant. Requires owner or admin with `can_manage_members`.
 
-Request:
-{"user_id":"uuid"}
-
-Response 200: empty
+Response 204: No Content
 403: forbidden
 404: user not found
 
-### POST /api/chats/{chat_id}/mute
+### POST /api/chats/{chat_id}/actions/mute
 
 Mute a participant for N minutes. Requires owner or admin with `can_manage_members`.
 
 Request:
 {"user_id":"uuid","minutes":30}
 
-Response 200: empty
+Response 204: No Content
 403: forbidden
 404: user not found
 
-### POST /api/chats/{chat_id}/unmute
+### POST /api/chats/{chat_id}/actions/unmute
 
 Unmute a participant. Requires owner or admin with `can_manage_members`.
 
 Request:
 {"user_id":"uuid"}
 
-Response 200: empty
+Response 204: No Content
 403: forbidden
 404: user not found
 
-### POST /api/chats/{chat_id}/leave
+### POST /api/chats/{chat_id}/actions/leave
 
 Current user leaves the chat. Direct chats cannot be left (delete instead) and return 405. Owners must transfer ownership before leaving; otherwise 409.
 
-Response 200: empty
+Response 204: No Content
 
-### POST /api/chats/{chat_id}/transfer-ownership
+### POST /api/chats/{chat_id}/actions/transfer-ownership
 
 Transfer ownership to another participant. Only owner can do this. Owner remains as admin.
 
 Request:
 {"user_id":"uuid"}
 
-Response 200: empty
+Response 204: No Content
 403: forbidden
 404: user not found or not a participant
 
-### POST /api/chats/{chat_id}/clear_messages
+### POST /api/chats/{chat_id}/actions/clear_messages
 
 Clears all messages for everyone.
 - Direct chats: any participant can call.
@@ -311,6 +322,13 @@ Response 200:
 
 403: not a participant
 
+### GET /api/chats/{chat_id}/messages/search?q=query&limit=50&before=RFC3339
+
+Search messages in a chat by content. Requires membership.
+
+Response 200: array of Message objects matching the query
+403: not a participant
+
 ### Avatars & Files
 
 - POST /api/users/me/avatars (multipart)
@@ -318,6 +336,7 @@ Response 200:
   - Query: compress=true|false (default false), quality=1..100 (default 80). When compressing images, EXIF is stripped.
 - POST /api/users/me/avatars/primary
   - Set primary avatar: {"avatar_id":"uuid"}
+  - Response 204: No Content
 - GET /api/users/{user_id}/avatars
   - List all avatars of user: [{id, content_type, is_primary, created_at}]
 - POST /api/files (multipart)
@@ -385,6 +404,8 @@ Rules:
   - Join a public group/channel by handle. Fails with 403 when the chat isn't public or is a direct chat.
 
 ### Messages
+
+Rate limiting: POST /api/chats/{chat_id}/messages is rate limited (e.g., 10 messages per minute per user) to prevent spam.
 
 - POST /api/chats/{chat_id}/messages
   - Send a message in a chat you joined. Returns {"id":"uuid"}
@@ -478,7 +499,7 @@ Client -> Server messages (JSON):
 Server -> Client messages (JSON):
 
 - {"type":"new_message","message": Message}
-- {"type":"error","message": string}
+- {"type":"error","code": "string","message": string}
 - {"type":"typing_indicator","chat_id":"uuid","user":{"id":"uuid","username":"string"}}
 - {"type":"message_edited","message": Message}
 - {"type":"message_deleted","chat_id":"uuid","message_ids":["uuid",...]}
@@ -491,6 +512,7 @@ Notes:
 
 - Server broadcasts events to relevant chat participants with active WS connections.
 - Use HTTP API to fetch history and initial state.
+- For reconnection: After disconnect, client should fetch latest state via HTTP APIs and send the last known message timestamp/ID to server for missed events sync.
 
 ### WebSocket Real-Time Experience Module Detailed Design Specification
 

@@ -6,6 +6,10 @@ use sqlx::{types::Uuid, FromRow};
 pub struct User {
     pub id: Uuid,
     pub username: String,
+    pub bio: Option<String>,
+    pub is_online: bool,
+    pub last_seen_at: Option<DateTime<Utc>>,
+    pub online_status_visibility: String, // "everyone", "contacts", "nobody"
     pub created_at: DateTime<Utc>,
 }
 
@@ -22,8 +26,14 @@ pub struct LoginReq {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct RefreshTokenReq {
+    pub refresh_token: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AuthResp {
     pub token: String,
+    pub refresh_token: String,
     pub user: User,
 }
 

@@ -406,7 +406,7 @@ pub async fn remove_participant(
     Ok(HttpResponse::Ok().finish())
 }
 
-#[post("/api/chats/{chat_id}/mute")]
+#[post("/api/chats/{chat_id}/actions/mute")]
 #[instrument(skip(state, req, user))]
 pub async fn mute_member(
     state: web::Data<AppState>,
@@ -433,7 +433,7 @@ pub async fn mute_member(
     Ok(HttpResponse::Ok().finish())
 }
 
-#[post("/api/chats/{chat_id}/unmute")]
+#[post("/api/chats/{chat_id}/actions/unmute")]
 #[instrument(skip(state, req, user))]
 pub async fn unmute_member(
     state: web::Data<AppState>,
@@ -456,7 +456,7 @@ pub async fn unmute_member(
     Ok(HttpResponse::Ok().finish())
 }
 
-#[post("/api/chats/{chat_id}/leave")]
+#[post("/api/chats/{chat_id}/actions/leave")]
 #[instrument(skip(state, user))]
 pub async fn leave_chat(
     state: web::Data<AppState>,
@@ -488,7 +488,7 @@ pub async fn leave_chat(
     Ok(HttpResponse::Ok().finish())
 }
 
-#[post("/api/chats/{chat_id}/clear_messages")]
+#[post("/api/chats/{chat_id}/actions/clear_messages")]
 #[instrument(skip(state, user))]
 pub async fn clear_messages(
     state: web::Data<AppState>,
@@ -1220,4 +1220,82 @@ pub async fn public_join(
     .map_err(internal_err)?;
     tx.commit().await.map_err(internal_err)?;
     Ok(HttpResponse::Ok().json(serde_json::json!({"chat_id": chat.id})))
+}
+
+#[get("/api/chats/{chat_id}/messages/search")]
+pub async fn search_messages(
+    state: web::Data<AppState>,
+    path: web::Path<Uuid>,
+    user: AuthUser,
+    q: web::Query<std::collections::HashMap<String, String>>,
+) -> actix_web::Result<HttpResponse> {
+    let chat_id = path.into_inner();
+    if !ensure_member(&state.pool, chat_id, user.0).await? {
+        return Ok(HttpResponse::Forbidden().finish());
+    }
+    let query = q.get("q").map_or("", |v| v).trim();
+    if query.is_empty() {
+        return Ok(HttpResponse::Ok().json(Vec::<MessageDto>::new()));
+    }
+    let limit = q.get("limit").and_then(|v| v.parse().ok()).unwrap_or(50).min(200) as i64;
+    let before = q.get("before").and_then(|v| DateTime::parse_from_rfc3339(v).ok()).map(|dt| dt.with_timezone(&Utc));
+
+    let base_query = if before.is_some() {
+        "SELECT m.id, m.chat_id, m.sender_id, u.username AS sender_username, CASE WHEN m.is_deleted THEN '' ELSE m.content END AS content, m.created_at, m.edited_at, m.reply_to_message_id, m.kind, m.sticker_id, m.gif_id, m.gif_url, m.gif_preview_url, m.gif_provider, m.forward_from_chat_id, m.forward_from_sender_id FROM messages m JOIN users u ON u.id = m.sender_id WHERE m.chat_id = $1 AND m.created_at < $2 AND m.content ILIKE $3 ORDER BY m.created_at DESC LIMIT $4"
+    } else {
+        "SELECT m.id, m.chat_id, m.sender_id, u.username AS sender_username, CASE WHEN m.is_deleted THEN '' ELSE m.content END AS content, m.created_at, m.edited_at, m.reply_to_message_id, m.kind, m.sticker_id, m.gif_id, m.gif_url, m.gif_preview_url, m.gif_provider, m.forward_from_chat_id, m.forward_from_sender_id FROM messages m JOIN users u ON u.id = m.sender_id WHERE m.chat_id = $1 AND m.content ILIKE $2 ORDER BY m.created_at DESC LIMIT $3"
+    };
+
+    let rows: Vec<MessageRecord> = if let Some(before) = before {
+        sqlx::query_as(base_query)
+            .bind(chat_id)
+            .bind(before)
+            .bind(format!("%{}%", query))
+            .bind(limit)
+            .fetch_all(&state.pool)
+            .await
+            .map_err(internal_err)?
+    } else {
+        sqlx::query_as(base_query)
+            .bind(chat_id)
+            .bind(format!("%{}%", query))
+            .bind(limit)
+            .fetch_all(&state.pool)
+            .await
+            .map_err(internal_err)?
+    };
+
+    let message_ids: Vec<Uuid> = rows.iter().map(|r| r.id).collect();
+    if message_ids.is_empty() {
+        return Ok(HttpResponse::Ok().json(Vec::<MessageDto>::new()));
+    }
+
+    let attachments = load_attachments(&state.pool, &message_ids).await?;
+    let mentions = load_mentions(&state.pool, &message_ids).await?;
+    let stickers = load_stickers(&state.pool, &message_ids).await?;
+    let replies = load_replies(&state.pool, &message_ids).await?;
+
+    let mut dtos = Vec::new();
+    for row in rows {
+        let dto = MessageDto {
+            id: row.id,
+            chat_id: row.chat_id,
+            sender: SimpleUserDto { id: row.sender_id, username: row.sender_username },
+            content: row.content,
+            kind: row.kind,
+            created_at: row.created_at,
+            edited_at: row.edited_at,
+            reply_to: replies.get(&row.id).cloned(),
+            attachments: attachments.get(&row.id).cloned().unwrap_or_default(),
+            mentions: mentions.get(&row.id).cloned().unwrap_or_default(),
+            read_receipt: None, // No reads for search
+            is_pinned: false, // Assume not pinned for search
+            forwarded_from: None, // Simplified for search
+            sticker: stickers.get(&row.id).cloned(),
+            gif: None, // Simplified for search
+        };
+        dtos.push(dto);
+    }
+
+    Ok(HttpResponse::Ok().json(dtos))
 }
