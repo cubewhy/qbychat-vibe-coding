@@ -10,6 +10,12 @@ pub struct NoteReq { pub note: String }
 #[derive(Serialize)]
 pub struct NoteResp { pub note: Option<String> }
 
+#[derive(Deserialize)]
+pub struct NotifyReq { pub mute_forever: Option<bool>, pub mute_until: Option<chrono::DateTime<chrono::Utc>>, pub notify_type: Option<String> }
+
+#[derive(Serialize)]
+pub struct NotifyResp { pub mute_forever: bool, pub mute_until: Option<chrono::DateTime<chrono::Utc>>, pub notify_type: String }
+
 fn forbidden() -> actix_web::Result<HttpResponse> { Ok(HttpResponse::Forbidden().finish()) }
 
 async fn ensure_member(state: &AppState, chat_id: Uuid, user_id: Uuid) -> Result<bool, actix_web::Error> {

@@ -8,6 +8,8 @@ pub mod uploads;
 pub mod admin;
 pub mod messages;
 pub mod members;
+pub mod chat_list;
+pub mod members_notify;
 
 pub fn config(cfg: &mut web::ServiceConfig) {
     cfg.service(auth::register)
@@ -37,5 +39,10 @@ pub fn config(cfg: &mut web::ServiceConfig) {
        .service(messages::unread_count)
        .service(members::get_note)
        .service(members::set_note)
-       .service(members::delete_note);
+       .service(members::delete_note)
+       .service(members_notify::get_notify)
+       .service(members_notify::set_notify)
+       .service(members_notify::get_mentions)
+       .service(members_notify::clear_mentions)
+       .service(chat_list::list_chats);
 }

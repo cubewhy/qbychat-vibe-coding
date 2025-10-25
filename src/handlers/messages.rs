@@ -17,6 +17,25 @@ pub async fn send_message(state: web::Data<AppState>, path: web::Path<Uuid>, use
     sqlx::query("INSERT INTO messages (id, chat_id, sender_id, content) VALUES ($1,$2,$3,$4)")
         .bind(id).bind(chat_id).bind(user.0).bind(req.content.trim())
         .execute(&state.pool).await.map_err(internal_err)?;
+
+    // naive mention detection: find @username mentions and append message id for mentioned members
+    let content = req.content.trim().to_string();
+    if content.contains('@') {
+        #[derive(sqlx::FromRow)]
+        struct U { user_id: Uuid, username: String }
+        let users: Vec<U> = sqlx::query_as::<_, U>(
+            "SELECT u.id as user_id, u.username FROM chat_participants p JOIN users u ON u.id = p.user_id WHERE p.chat_id = $1"
+        ).bind(chat_id).fetch_all(&state.pool).await.map_err(internal_err)?;
+        for u in users {
+            if u.user_id == user.0 { continue; }
+            let needle = format!("@{}", u.username);
+            if content.contains(&needle) {
+                sqlx::query("UPDATE chat_members SET mention_message_ids = array_append(mention_message_ids, $1) WHERE chat_id = $2 AND user_id = $3")
+                    .bind(id).bind(chat_id).bind(u.user_id).execute(&state.pool).await.map_err(internal_err)?;
+            }
+        }
+    }
+
     Ok(HttpResponse::Ok().json(serde_json::json!({"id": id})))
 }
 

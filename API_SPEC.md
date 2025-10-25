@@ -164,13 +164,19 @@ Response 200:
 - Cron purge
   - Deploy an external cron (e.g., host or container) to call POST /api/admin/storage/purge daily at 00:00.
 
-### Member Notes
+### Member Notes and Notifications
+
 - GET /api/chats/{chat_id}/member/note -> {"note": string|null}
 - POST /api/chats/{chat_id}/member/note {"note":"string"} -> 200
 - DELETE /api/chats/{chat_id}/member/note -> 200
-  - Only chat members can manage their note.
+- GET /api/chats/{chat_id}/member/notify -> {"mute_forever": bool, "mute_until": RFC3339|null, "notify_type": "all"|"mentions_only"|"none"}
+- POST /api/chats/{chat_id}/member/notify {"mute_forever": bool, "mute_until": RFC3339|null, "notify_type": "all"|"mentions_only"|"none"} -> 200
+- GET /api/chats/{chat_id}/member/mentions -> {"message_ids": [uuid,...]}
+- DELETE /api/chats/{chat_id}/member/mentions -> 200
+  - Only chat members can manage their note/notification settings.
 
 ### Chat administration
+
 - POST /api/chats/{chat_id}/remove — kick a member (owner/admin only)
 - POST /api/chats/{chat_id}/leave — current user leaves the chat
 - POST /api/chats/{chat_id}/clear_messages —
@@ -194,6 +200,24 @@ Response 200:
 - Admin
   - POST /api/admin/reads/purge: delete message_reads_small older than 7 days
 
+### Chat list
+- GET /api/chats?include_unread=true|false&include_first=true|false
+  - Returns all chats for current user.
+  - Optional fields when requested:
+    - unread: unread count computed by last_read_message_id timestamp and excluding deleted messages
+    - first_message: earliest non-deleted message in the chat
+
+### Member Notes and Notifications
+
+- GET /api/chats/{chat_id}/member/note -> {"note": string|null}
+- POST /api/chats/{chat_id}/member/note {"note":"string"} -> 200
+- DELETE /api/chats/{chat_id}/member/note -> 200
+- GET /api/chats/{chat_id}/member/notify -> {"mute_forever": bool, "mute_until": RFC3339|null, "notify_type": "all"|"mentions_only"|"none"}
+- POST /api/chats/{chat_id}/member/notify {"mute_forever": bool, "mute_until": RFC3339|null, "notify_type": "all"|"mentions_only"|"none"} -> 200
+- GET /api/chats/{chat_id}/member/mentions -> {"message_ids": [uuid,...]}
+- DELETE /api/chats/{chat_id}/member/mentions -> 200
+  - Only chat members can manage their note/notification settings.
+
 ### Members & Unread
 
 - Member entity: chat_members(chat_id, user_id, note, last_read_message_id, created_at)
@@ -206,13 +230,19 @@ Response 200:
     - Count messages in the chat with created_at > T AND is_deleted=false
 - Bulk read advances chat_members.last_read_message_id to the newest message in the batch
 
-### Member Notes
+### Member Notes and Notifications
+
 - GET /api/chats/{chat_id}/member/note -> {"note": string|null}
 - POST /api/chats/{chat_id}/member/note {"note":"string"} -> 200
 - DELETE /api/chats/{chat_id}/member/note -> 200
-  - Only chat members can manage their note.
+- GET /api/chats/{chat_id}/member/notify -> {"mute_forever": bool, "mute_until": RFC3339|null, "notify_type": "all"|"mentions_only"|"none"}
+- POST /api/chats/{chat_id}/member/notify {"mute_forever": bool, "mute_until": RFC3339|null, "notify_type": "all"|"mentions_only"|"none"} -> 200
+- GET /api/chats/{chat_id}/member/mentions -> {"message_ids": [uuid,...]}
+- DELETE /api/chats/{chat_id}/member/mentions -> 200
+  - Only chat members can manage their note/notification settings.
 
 ### Chat administration
+
 - POST /api/chats/{chat_id}/remove — kick a member (owner/admin only)
 - POST /api/chats/{chat_id}/leave — current user leaves the chat
 - POST /api/chats/{chat_id}/clear_messages —
