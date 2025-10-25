@@ -29,7 +29,7 @@ pub struct AuthResp {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateDirectChatReq {
-    pub peer_username: String,
+    pub peer_user_id: Uuid,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -43,8 +43,42 @@ pub struct CreateChannelReq {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct AddParticipantReq {
+pub struct TransferOwnershipReq {
+    pub user_id: Uuid,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ChatDto {
+    pub id: Uuid,
+    pub r#type: String, // "direct", "group", "channel"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<SimpleUserDto>,
+    pub created_at: DateTime<Utc>,
+    pub member_count: i64,
+    pub is_public: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub public_handle: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pinned_message: Option<MessageDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ParticipantDto {
+    pub user_id: Uuid,
     pub username: String,
+    pub joined_at: DateTime<Utc>,
+    pub role: String, // "owner", "admin", "member"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<AdminPermissionsPayload>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AddParticipantReq {
+    pub user_id: Uuid,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -58,24 +92,24 @@ pub struct AdminPermissionsPayload {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PromoteAdminReq {
-    pub username: String,
+    pub user_id: Uuid,
     pub permissions: Option<AdminPermissionsPayload>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AdminReq {
-    pub username: String,
+    pub user_id: Uuid,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MuteReq {
-    pub username: String,
+    pub user_id: Uuid,
     pub minutes: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UnmuteReq {
-    pub username: String,
+    pub user_id: Uuid,
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
@@ -212,7 +246,7 @@ pub struct GifMessageDto {
     pub provider: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct MessageDto {
     pub id: Uuid,
     pub chat_id: Uuid,

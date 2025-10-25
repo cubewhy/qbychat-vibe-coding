@@ -5,6 +5,47 @@ Auth: Bearer JWT in Authorization header. For WebSocket, pass ?token=... or Auth
 
 This project aims to be a lightweight Telegram-like clone.
 
+## Objects
+
+### Chat Object
+{
+  "id": "uuid",
+  "type": "direct" | "group" | "channel",
+  "title": "string|null", // null for direct chats
+  "owner": {"id": "uuid", "username": "string"} | null, // null for direct chats
+  "created_at": "RFC3339",
+  "member_count": number,
+  "is_public": bool,
+  "public_handle": "string|null",
+  "pinned_message": MessageObject | null, // lightweight message object without read_receipt
+  "description": "string|null"
+}
+
+### Message Object
+{
+  "id": "uuid",
+  "chat_id": "uuid",
+  "sender": {"id": "uuid", "username": "string"},
+  "content": "string",
+  "created_at": "RFC3339",
+  "edited_at": "RFC3339|null",
+  "reply_to_message_id": "uuid|null",
+  "attachments": [{"id": "uuid", "content_type": "string"}],
+  "mentions": [{"user_id": "uuid", "username": "string"}],
+  "read_receipt": {
+    "read_count": number,
+    "is_read_by_peer": bool,
+    "last_read_at": "RFC3339|null"
+  } | null,
+  "is_pinned": false,
+  "forwarded_from": {
+    "chat": {"id": "uuid", "title": "string|null"},
+    "sender": {"id": "uuid", "username": "string"}
+  } | null,
+  "sticker": {"id": "uuid", "pack_id": "uuid", "pack_short_name": "string", "emoji": ":)", "file_id": "uuid"} | null,
+  "gif": {"id": "tenor-id", "url": "https://...", "preview_url": "https://...", "provider": "tenor"} | null
+}
+
 ## Auth
 
 ### POST /api/register
@@ -36,14 +77,12 @@ Response 200: same as /api/register
 
 ### POST /api/chats/direct
 
-Create or get a direct chat with another user by username.
+Create or get a direct chat with another user by user_id.
 
 Request:
-{"peer_username":"string"}
+{"peer_user_id":"uuid"}
 
-Response 200:
-{"chat_id":"uuid"}
-
+Response 201: Chat Object
 404: peer not found
 
 ### POST /api/chats/group
@@ -53,8 +92,7 @@ Create a group chat. Creator becomes owner and first participant.
 Request:
 {"title":"string"}
 
-Response 200:
-{"chat_id":"uuid"}
+Response 201: Chat Object
 
 ### POST /api/chats/channel
 
@@ -63,15 +101,22 @@ Create a broadcast channel. Only owner can send messages.
 Request:
 {"title":"string"}
 
-Response 200:
-{"chat_id":"uuid"}
+Response 201: Chat Object
+
+### GET /api/chats/{chat_id}
+
+Retrieve full details of a chat. Requires membership.
+
+Response 200: Chat Object
+403: not a participant
+404: chat not found
 
 ### POST /api/chats/{chat_id}/participants
 
-Add a participant by username. Owner or admin with `can_invite_users` can add.
+Add a participant by user_id. Owner or admin with `can_invite_users` can add.
 
 Request:
-{"username":"string"}
+{"user_id":"uuid"}
 
 Response 200: empty
 403: forbidden
@@ -94,7 +139,7 @@ Promote or update an admin (owner only).
 
 Request:
 {
-  "username":"string",
+  "user_id":"uuid",
   "permissions":{
     "can_change_info":bool,
     "can_delete_messages":bool,
@@ -137,23 +182,43 @@ Response 200:
   ]
 }
 
-### POST /api/chats/{chat_id}/admins/remove
+### GET /api/chats/{chat_id}/participants?limit=50&cursor=uuid
+
+List all participants in a chat with pagination. Requires membership.
+
+Response 200:
+{
+  "participants": [
+    {
+      "user_id": "uuid",
+      "username": "string",
+      "joined_at": "RFC3339",
+      "role": "owner" | "admin" | "member",
+      "permissions": {...} // only for admins
+    }
+  ],
+  "next_cursor": "uuid|null"
+}
+
+403: not a participant
+
+### DELETE /api/chats/{chat_id}/admins
 
 Demote an admin. Only owner can do this.
 
 Request:
-{"username":"string"}
+{"user_id":"uuid"}
 
 Response 200: empty
 403: forbidden
 404: user not found
 
-### POST /api/chats/{chat_id}/remove
+### DELETE /api/chats/{chat_id}/participants
 
 Remove a participant. Requires owner or admin with `can_manage_members`.
 
 Request:
-{"username":"string"}
+{"user_id":"uuid"}
 
 Response 200: empty
 403: forbidden
@@ -164,7 +229,7 @@ Response 200: empty
 Mute a participant for N minutes. Requires owner or admin with `can_manage_members`.
 
 Request:
-{"username":"string","minutes":30}
+{"user_id":"uuid","minutes":30}
 
 Response 200: empty
 403: forbidden
@@ -175,7 +240,7 @@ Response 200: empty
 Unmute a participant. Requires owner or admin with `can_manage_members`.
 
 Request:
-{"username":"string"}
+{"user_id":"uuid"}
 
 Response 200: empty
 403: forbidden
@@ -186,6 +251,17 @@ Response 200: empty
 Current user leaves the chat. Direct chats cannot be left (delete instead) and return 405. Owners must transfer ownership before leaving; otherwise 409.
 
 Response 200: empty
+
+### POST /api/chats/{chat_id}/transfer-ownership
+
+Transfer ownership to another participant. Only owner can do this. Owner remains as admin.
+
+Request:
+{"user_id":"uuid"}
+
+Response 200: empty
+403: forbidden
+404: user not found or not a participant
 
 ### POST /api/chats/{chat_id}/clear_messages
 
@@ -322,9 +398,9 @@ Rules:
     - Up to 50 unique mentions per message; exceeding this returns 422.
     - Mentioned users bypass muted state unless `notify_type="none"`.
     - The response includes a `mentions` array mirroring what `GET /messages` returns.
-- POST /api/messages/{message_id}/edit
+- PATCH /api/messages/{message_id}
   - Edit own message. Request: {"content":"string"}. 403 if not owner or message deleted. Sets edited_at.
-- POST /api/messages/{message_id}/delete
+- DELETE /api/messages/{message_id}
   - Soft delete own message. Sets is_deleted=true, deleted_at=now(). Listing messages will return empty content for deleted ones.
 - POST /api/messages/read_bulk
   - Bulk mark messages as read. Request: {"chat_id":"uuid","message_ids":["uuid",...]}
@@ -395,9 +471,9 @@ Path: /ws?token=...
 
 Client -> Server messages (JSON):
 
-- {"type":"send_message","chat_id":"uuid","content":"string"}
-- {"type":"start_typing","chat_id":"uuid"}
-- {"type":"mark_as_read","chat_id":"uuid","last_read_message_id":"uuid"}
+- {"type":"send_message","chat_id":"uuid","content":"string","request_id":"uuid"} // optional request_id for ack
+- {"type":"start_typing","chat_id":"uuid","request_id":"uuid"} // optional
+- {"type":"mark_as_read","chat_id":"uuid","last_read_message_id":"uuid","request_id":"uuid"} // optional
 
 Server -> Client messages (JSON):
 
@@ -409,6 +485,7 @@ Server -> Client messages (JSON):
 - {"type":"messages_read","chat_id":"uuid","reader_user_id":"uuid","last_read_message_id":"uuid","read_count":number|null,"is_read_by_peer":bool|null}
 - {"type":"presence_update","user_id":"uuid","status":"online|offline","last_seen_at":"RFC3339|null"}
 - {"type":"chat_action","chat_id":"uuid","action_type":"string","data":{...}}
+- {"type":"ack","request_id":"uuid"} // acknowledgment for C2S events with request_id
 
 Notes:
 
@@ -558,8 +635,9 @@ Broadcast user's online status changes.
     ```
 * **Push logic**:
     * Requires an online status service (usually implemented with Redis).
-    * When user WebSocket connection is established, mark as `online`, and broadcast `presence_update` to all online users who have **common chats** with them.
-    * When user WebSocket disconnects (needs heartbeat and timeout mechanism), mark as `offline` and record `last_seen_at`, then broadcast.
+    * To avoid broadcast storms in large groups, only broadcast to users who have direct chats (friends) or small groups (<=100 members) with the user.
+    * When user WebSocket connection is established, mark as `online`, and broadcast `presence_update` to relevant online users.
+    * When user WebSocket disconnects (needs heartbeat and timeout mechanism), mark as `offline` and record `last_seen_at`, then broadcast to relevant users.
 
 ##### 7. `chat_action`
 A general chat action event, for handling non-message updates.

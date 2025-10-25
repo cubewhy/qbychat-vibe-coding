@@ -13,11 +13,11 @@ use tracing::{error, info};
 #[serde(tag = "type")]
 pub enum ClientWsMsg {
     #[serde(rename = "send_message")]
-    SendMessage { chat_id: Uuid, content: String },
+    SendMessage { chat_id: Uuid, content: String, request_id: Option<Uuid> },
     #[serde(rename = "start_typing")]
-    StartTyping { chat_id: Uuid },
+    StartTyping { chat_id: Uuid, request_id: Option<Uuid> },
     #[serde(rename = "mark_as_read")]
-    MarkAsRead { chat_id: Uuid, last_read_message_id: Uuid },
+    MarkAsRead { chat_id: Uuid, last_read_message_id: Uuid, request_id: Option<Uuid> },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -39,6 +39,8 @@ pub enum ServerWsMsg {
     PresenceUpdate { user_id: Uuid, status: String, last_seen_at: Option<String> },
     #[serde(rename = "chat_action")]
     ChatAction { chat_id: Uuid, action_type: String, data: serde_json::Value },
+    #[serde(rename = "ack")]
+    Ack { request_id: Uuid },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -161,7 +163,7 @@ async fn ws_session(
 async fn handle_ws_text(state: &AppState, user_id: Uuid, txt: &str) -> anyhow::Result<()> {
     let msg: ClientWsMsg = serde_json::from_str(txt)?;
     match msg {
-        ClientWsMsg::SendMessage { chat_id, content } => {
+        ClientWsMsg::SendMessage { chat_id, content, request_id } => {
             let is_member =
                 sqlx::query("SELECT 1 FROM chat_participants WHERE chat_id = $1 AND user_id = $2")
                     .bind(chat_id)
@@ -243,8 +245,13 @@ async fn handle_ws_text(state: &AppState, user_id: Uuid, txt: &str) -> anyhow::R
                     let _ = tx.send(server_msg.clone());
                 }
             }
+            if let Some(rid) = request_id {
+                if let Some(tx) = state.clients.get(&user_id) {
+                    let _ = tx.send(ServerWsMsg::Ack { request_id: rid });
+                }
+            }
         }
-        ClientWsMsg::StartTyping { chat_id } => {
+        ClientWsMsg::StartTyping { chat_id, request_id } => {
             // Check if member
             let is_member = sqlx::query("SELECT 1 FROM chat_participants WHERE chat_id = $1 AND user_id = $2")
                 .bind(chat_id)
@@ -283,8 +290,13 @@ async fn handle_ws_text(state: &AppState, user_id: Uuid, txt: &str) -> anyhow::R
                     let _ = tx.send(typing_msg.clone());
                 }
             }
+            if let Some(rid) = request_id {
+                if let Some(tx) = state.clients.get(&user_id) {
+                    let _ = tx.send(ServerWsMsg::Ack { request_id: rid });
+                }
+            }
         }
-        ClientWsMsg::MarkAsRead { chat_id, last_read_message_id } => {
+        ClientWsMsg::MarkAsRead { chat_id, last_read_message_id, request_id } => {
             // Check if member
             let is_member = sqlx::query("SELECT 1 FROM chat_participants WHERE chat_id = $1 AND user_id = $2")
                 .bind(chat_id)
@@ -361,6 +373,11 @@ async fn handle_ws_text(state: &AppState, user_id: Uuid, txt: &str) -> anyhow::R
                     });
                 }
             }
+            if let Some(rid) = request_id {
+                if let Some(tx) = state.clients.get(&user_id) {
+                    let _ = tx.send(ServerWsMsg::Ack { request_id: rid });
+                }
+            }
         }
     }
     Ok(())
@@ -375,10 +392,14 @@ fn send_ws_err(state: &AppState, user_id: Uuid, msg: &str) {
 }
 
 async fn get_common_chat_users(state: &AppState, user_id: Uuid) -> Vec<Uuid> {
+    // Only broadcast to users in direct chats or small groups (<=100 members)
     sqlx::query_scalar(
         "SELECT DISTINCT cp2.user_id FROM chat_participants cp1
          JOIN chat_participants cp2 ON cp1.chat_id = cp2.chat_id
-         WHERE cp1.user_id = $1 AND cp2.user_id != $1",
+         JOIN chats c ON c.id = cp1.chat_id
+         LEFT JOIN (SELECT chat_id, COUNT(*) as cnt FROM chat_participants GROUP BY chat_id) pc ON pc.chat_id = c.id
+         WHERE cp1.user_id = $1 AND cp2.user_id != $1
+         AND (c.is_direct = TRUE OR pc.cnt <= 100)",
     )
     .bind(user_id)
     .fetch_all(&state.pool)

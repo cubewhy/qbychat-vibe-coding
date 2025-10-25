@@ -1,4 +1,4 @@
-use actix_web::{get, post, web, HttpResponse};
+use actix_web::{delete, get, patch, post, web, HttpResponse};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use sqlx::types::Uuid;
@@ -7,10 +7,10 @@ use tracing::{info, instrument};
 
 use crate::auth::{internal_err, AuthUser};
 use crate::models::{
-    AddParticipantReq, AdminPermissionsPayload, AdminReq, CreateChannelReq, CreateDirectChatReq,
+    AddParticipantReq, AdminPermissionsPayload, AdminReq, ChatDto, CreateChannelReq, CreateDirectChatReq,
     CreateGroupReq, ForwardedChatDto, ForwardedFromDto, GifMessageDto, ListQuery,
     MessageAttachmentDto, MessageDto, MessageMentionDto, MessageReadReceiptDto, MessageReplyDto,
-    PromoteAdminReq, SetVisibilityReq, SimpleUserDto, StickerMessageDto,
+    MuteReq, PromoteAdminReq, SetVisibilityReq, SimpleUserDto, StickerMessageDto, UnmuteReq,
 };
 use crate::state::AppState;
 use crate::ws::ServerWsMsg;
@@ -101,21 +101,11 @@ pub async fn start_direct_chat(
     req: web::Json<CreateDirectChatReq>,
     user: AuthUser,
 ) -> actix_web::Result<HttpResponse> {
-    #[derive(sqlx::FromRow)]
-    struct IdRow {
-        id: Uuid,
-    }
-    let peer = sqlx::query_as::<_, IdRow>("SELECT id FROM users WHERE username = $1")
-        .bind(req.peer_username.trim())
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(internal_err)?
-        .ok_or_else(|| actix_web::error::ErrorNotFound("peer not found"))?;
-
-    let chat_id = ensure_direct_chat(&state.pool, user.0, peer.id)
+    let chat_id = ensure_direct_chat(&state.pool, user.0, req.peer_user_id)
         .await
         .map_err(internal_err)?;
-    Ok(HttpResponse::Ok().json(serde_json::json!({ "chat_id": chat_id })))
+    let chat_dto = build_chat_dto(&state.pool, chat_id, user.0).await?;
+    Ok(HttpResponse::Created().json(chat_dto))
 }
 
 #[post("/api/chats/group")]
@@ -126,7 +116,8 @@ pub async fn create_group(
     user: AuthUser,
 ) -> actix_web::Result<HttpResponse> {
     let chat_id = create_chat_with_owner(&state.pool, &req.title, "group", user.0).await?;
-    Ok(HttpResponse::Ok().json(serde_json::json!({ "chat_id": chat_id })))
+    let chat_dto = build_chat_dto(&state.pool, chat_id, user.0).await?;
+    Ok(HttpResponse::Created().json(chat_dto))
 }
 
 #[post("/api/chats/channel")]
@@ -137,7 +128,8 @@ pub async fn create_channel(
     user: AuthUser,
 ) -> actix_web::Result<HttpResponse> {
     let chat_id = create_chat_with_owner(&state.pool, &req.title, "channel", user.0).await?;
-    Ok(HttpResponse::Ok().json(serde_json::json!({ "chat_id": chat_id })))
+    let chat_dto = build_chat_dto(&state.pool, chat_id, user.0).await?;
+    Ok(HttpResponse::Created().json(chat_dto))
 }
 
 async fn create_chat_with_owner(
@@ -189,23 +181,12 @@ pub async fn add_participant(
         return Ok(HttpResponse::Forbidden().finish());
     }
 
-    #[derive(sqlx::FromRow)]
-    struct IdRow {
-        id: Uuid,
-    }
-    let peer = sqlx::query_as::<_, IdRow>("SELECT id FROM users WHERE username = $1")
-        .bind(req.username.trim())
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(internal_err)?
-        .ok_or_else(|| actix_web::error::ErrorNotFound("user not found"))?;
-
     let mut tx = state.pool.begin().await.map_err(internal_err)?;
     sqlx::query(
         "INSERT INTO chat_participants (chat_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
     )
     .bind(chat_id)
-    .bind(peer.id)
+    .bind(req.user_id)
     .execute(&mut *tx)
     .await
     .map_err(internal_err)?;
@@ -213,7 +194,7 @@ pub async fn add_participant(
         "INSERT INTO chat_members (chat_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
     )
     .bind(chat_id)
-    .bind(peer.id)
+    .bind(req.user_id)
     .execute(&mut *tx)
     .await
     .map_err(internal_err)?;
@@ -312,18 +293,7 @@ pub async fn promote_admin(
         .clone()
         .ok_or_else(|| actix_web::error::ErrorUnprocessableEntity("permissions required"))?;
 
-    #[derive(sqlx::FromRow)]
-    struct IdRow {
-        id: Uuid,
-    }
-    let target = sqlx::query_as::<_, IdRow>("SELECT id FROM users WHERE username = $1")
-        .bind(req.username.trim())
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(internal_err)?
-        .ok_or_else(|| actix_web::error::ErrorNotFound("user not found"))?;
-
-    if !ensure_member(&state.pool, chat_id, target.id).await? {
+    if !ensure_member(&state.pool, chat_id, req.user_id).await? {
         return Ok(HttpResponse::BadRequest().body("user must join chat first"));
     }
 
@@ -331,7 +301,7 @@ pub async fn promote_admin(
         "INSERT INTO chat_admin_permissions (chat_id, user_id, can_change_info, can_delete_messages, can_invite_users, can_pin_messages, can_manage_members, granted_by, granted_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now()) ON CONFLICT (chat_id, user_id) DO UPDATE SET can_change_info = EXCLUDED.can_change_info, can_delete_messages = EXCLUDED.can_delete_messages, can_invite_users = EXCLUDED.can_invite_users, can_pin_messages = EXCLUDED.can_pin_messages, can_manage_members = EXCLUDED.can_manage_members, granted_by = EXCLUDED.granted_by, granted_at = now()",
     )
     .bind(chat_id)
-    .bind(target.id)
+    .bind(req.user_id)
     .bind(perms.can_change_info)
     .bind(perms.can_delete_messages)
     .bind(perms.can_invite_users)
@@ -342,16 +312,22 @@ pub async fn promote_admin(
     .await
     .map_err(internal_err)?;
 
-    info!(chat_id = %chat_id, target = %target.id, "granted admin permissions");
+    let username = sqlx::query_scalar::<_, String>("SELECT username FROM users WHERE id = $1")
+        .bind(req.user_id)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(internal_err)?;
+
+    info!(chat_id = %chat_id, target = %req.user_id, "granted admin permissions");
     Ok(HttpResponse::Ok().json(serde_json::json!({
-        "user_id": target.id,
-        "username": req.username,
+        "user_id": req.user_id,
+        "username": username,
         "permissions": perms,
         "granted_by": user.0,
     })))
 }
 
-#[post("/api/chats/{chat_id}/admins/remove")]
+#[delete("/api/chats/{chat_id}/admins")]
 #[instrument(skip(state, req, user))]
 pub async fn demote_admin(
     state: web::Data<AppState>,
@@ -364,26 +340,16 @@ pub async fn demote_admin(
     if meta.owner_id != Some(user.0) {
         return Ok(HttpResponse::Forbidden().finish());
     }
-    #[derive(sqlx::FromRow)]
-    struct IdRow {
-        id: Uuid,
-    }
-    let target = sqlx::query_as::<_, IdRow>("SELECT id FROM users WHERE username = $1")
-        .bind(req.username.trim())
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(internal_err)?
-        .ok_or_else(|| actix_web::error::ErrorNotFound("user not found"))?;
     sqlx::query("DELETE FROM chat_admin_permissions WHERE chat_id = $1 AND user_id = $2")
         .bind(chat_id)
-        .bind(target.id)
+        .bind(req.user_id)
         .execute(&state.pool)
         .await
         .map_err(internal_err)?;
     Ok(HttpResponse::Ok().finish())
 }
 
-#[post("/api/chats/{chat_id}/remove")]
+#[delete("/api/chats/{chat_id}/participants")]
 #[instrument(skip(state, req, user))]
 pub async fn remove_participant(
     state: web::Data<AppState>,
@@ -397,30 +363,26 @@ pub async fn remove_participant(
     if meta.owner_id != Some(user.0) && !has_perm(perms.as_ref(), |p| p.can_manage_members) {
         return Ok(HttpResponse::Forbidden().finish());
     }
-    #[derive(sqlx::FromRow)]
-    struct IdRow {
-        id: Uuid,
-    }
-    let target = sqlx::query_as::<_, IdRow>("SELECT id FROM users WHERE username = $1")
-        .bind(req.username.trim())
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(internal_err)?
-        .ok_or_else(|| actix_web::error::ErrorNotFound("user not found"))?;
     let mut tx = state.pool.begin().await.map_err(internal_err)?;
     sqlx::query("DELETE FROM chat_participants WHERE chat_id = $1 AND user_id = $2")
         .bind(chat_id)
-        .bind(target.id)
+        .bind(req.user_id)
         .execute(&mut *tx)
         .await
         .map_err(internal_err)?;
     sqlx::query("DELETE FROM chat_members WHERE chat_id = $1 AND user_id = $2")
         .bind(chat_id)
-        .bind(target.id)
+        .bind(req.user_id)
         .execute(&mut *tx)
         .await
         .map_err(internal_err)?;
     tx.commit().await.map_err(internal_err)?;
+
+    let username = sqlx::query_scalar::<_, String>("SELECT username FROM users WHERE id = $1")
+        .bind(req.user_id)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(internal_err)?;
 
     // Broadcast chat_action
     let participants = sqlx::query_scalar::<_, Uuid>(
@@ -433,7 +395,7 @@ pub async fn remove_participant(
     let msg = ServerWsMsg::ChatAction {
         chat_id,
         action_type: "user_left".to_string(),
-        data: serde_json::json!({ "user": { "id": target.id, "username": req.username } }),
+        data: serde_json::json!({ "user": { "id": req.user_id, "username": username } }),
     };
     for uid in participants {
         if let Some(tx) = state.clients.get(&uid) {
@@ -442,12 +404,6 @@ pub async fn remove_participant(
     }
 
     Ok(HttpResponse::Ok().finish())
-}
-
-#[derive(Deserialize)]
-struct MuteReq {
-    username: String,
-    minutes: i64,
 }
 
 #[post("/api/chats/{chat_id}/mute")]
@@ -464,32 +420,17 @@ pub async fn mute_member(
     if meta.owner_id != Some(user.0) && !has_perm(perms.as_ref(), |p| p.can_manage_members) {
         return Ok(HttpResponse::Forbidden().finish());
     }
-    #[derive(sqlx::FromRow)]
-    struct IdRow {
-        id: Uuid,
-    }
-    let target = sqlx::query_as::<_, IdRow>("SELECT id FROM users WHERE username = $1")
-        .bind(req.username.trim())
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(internal_err)?
-        .ok_or_else(|| actix_web::error::ErrorNotFound("user not found"))?;
     let until = chrono::Utc::now() + chrono::Duration::minutes(req.minutes.max(1));
     sqlx::query(
         "INSERT INTO chat_mutes (chat_id, user_id, muted_until) VALUES ($1,$2,$3) ON CONFLICT (chat_id, user_id) DO UPDATE SET muted_until = EXCLUDED.muted_until",
     )
     .bind(chat_id)
-    .bind(target.id)
+    .bind(req.user_id)
     .bind(until)
     .execute(&state.pool)
     .await
     .map_err(internal_err)?;
     Ok(HttpResponse::Ok().finish())
-}
-
-#[derive(Deserialize)]
-struct UnmuteReq {
-    username: String,
 }
 
 #[post("/api/chats/{chat_id}/unmute")]
@@ -506,19 +447,9 @@ pub async fn unmute_member(
     if meta.owner_id != Some(user.0) && !has_perm(perms.as_ref(), |p| p.can_manage_members) {
         return Ok(HttpResponse::Forbidden().finish());
     }
-    #[derive(sqlx::FromRow)]
-    struct IdRow {
-        id: Uuid,
-    }
-    let target = sqlx::query_as::<_, IdRow>("SELECT id FROM users WHERE username = $1")
-        .bind(req.username.trim())
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(internal_err)?
-        .ok_or_else(|| actix_web::error::ErrorNotFound("user not found"))?;
     sqlx::query("DELETE FROM chat_mutes WHERE chat_id = $1 AND user_id = $2")
         .bind(chat_id)
-        .bind(target.id)
+        .bind(req.user_id)
         .execute(&state.pool)
         .await
         .map_err(internal_err)?;
@@ -1093,6 +1024,71 @@ pub async fn ensure_direct_chat(pool: &Pool<Postgres>, a: Uuid, b: Uuid) -> anyh
     .await?;
     tx.commit().await?;
     Ok(chat_id)
+}
+
+async fn build_chat_dto(
+    pool: &Pool<Postgres>,
+    chat_id: Uuid,
+    user_id: Uuid,
+) -> Result<ChatDto, actix_web::Error> {
+    #[derive(sqlx::FromRow)]
+    struct ChatRow {
+        id: Uuid,
+        is_direct: bool,
+        chat_type: Option<String>,
+        owner_id: Option<Uuid>,
+        title: Option<String>,
+        created_at: DateTime<Utc>,
+        is_public: bool,
+        public_handle: Option<String>,
+        pinned_message_id: Option<Uuid>,
+        description: Option<String>,
+    }
+    let row: ChatRow = sqlx::query_as(
+        "SELECT id, is_direct, chat_type, owner_id, title, created_at, is_public, public_handle, pinned_message_id, description FROM chats WHERE id = $1",
+    )
+    .bind(chat_id)
+    .fetch_one(pool)
+    .await
+    .map_err(internal_err)?;
+
+    let member_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chat_participants WHERE chat_id = $1")
+        .bind(chat_id)
+        .fetch_one(pool)
+        .await
+        .map_err(internal_err)?;
+
+    let r#type = if row.is_direct {
+        "direct".to_string()
+    } else {
+        row.chat_type.unwrap_or("group".to_string())
+    };
+
+    let owner = if let Some(oid) = row.owner_id {
+        let username: String = sqlx::query_scalar("SELECT username FROM users WHERE id = $1")
+            .bind(oid)
+            .fetch_one(pool)
+            .await
+            .map_err(internal_err)?;
+        Some(SimpleUserDto { id: oid, username })
+    } else {
+        None
+    };
+
+    let pinned_message = None; // TODO: implement loading pinned message
+
+    Ok(ChatDto {
+        id: row.id,
+        r#type,
+        title: row.title,
+        owner,
+        created_at: row.created_at,
+        member_count,
+        is_public: row.is_public,
+        public_handle: row.public_handle,
+        pinned_message,
+        description: row.description,
+    })
 }
 
 #[post("/api/chats/{chat_id}/visibility")]

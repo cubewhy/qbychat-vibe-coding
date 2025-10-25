@@ -1,4 +1,4 @@
-use actix_web::{get, post, web, HttpResponse};
+use actix_web::{delete, get, patch, post, web, HttpResponse};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use sqlx::types::Uuid;
@@ -94,7 +94,7 @@ pub struct EditMessageReq {
     pub content: String,
 }
 
-#[post("/api/messages/{message_id}/edit")]
+#[patch("/api/messages/{message_id}")]
 pub async fn edit_message(
     state: web::Data<AppState>,
     path: web::Path<Uuid>,
@@ -141,7 +141,7 @@ pub async fn edit_message(
     Ok(HttpResponse::Ok().finish())
 }
 
-#[post("/api/messages/{message_id}/delete")]
+#[delete("/api/messages/{message_id}")]
 pub async fn delete_message(
     state: web::Data<AppState>,
     path: web::Path<Uuid>,
