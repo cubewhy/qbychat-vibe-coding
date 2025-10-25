@@ -1,12 +1,13 @@
-pub mod state;
-pub mod models;
 pub mod auth;
+pub mod gif;
 pub mod handlers;
-pub mod ws;
+pub mod models;
+pub mod state;
 pub mod upload;
+pub mod ws;
 
-use actix_web::{App, web};
 use actix_web::dev::ServiceRequest;
+use actix_web::{web, App};
 use state::AppState;
 
 pub fn app_factory(state: AppState) -> App<impl actix_web::dev::ServiceFactory<ServiceRequest>> {

@@ -1,9 +1,10 @@
-use std::sync::Arc;
+use crate::gif::GifProvider;
+use crate::ws::ServerWsMsg;
 use dashmap::DashMap;
-use tokio::sync::mpsc;
 use sqlx::types::Uuid;
 use sqlx::PgPool;
-use crate::ws::ServerWsMsg;
+use std::sync::Arc;
+use tokio::sync::mpsc;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -12,4 +13,5 @@ pub struct AppState {
     pub jwt_secret: Arc<String>,
     pub storage_dir: Arc<std::path::PathBuf>,
     pub redis: Option<redis::Client>,
+    pub gif_provider: Option<Arc<GifProvider>>,
 }

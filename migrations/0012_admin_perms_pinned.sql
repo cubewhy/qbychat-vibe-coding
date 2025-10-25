@@ -1,0 +1,10 @@
+CREATE TABLE IF NOT EXISTS chat_admin_permissions (
+  chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  can_change_info BOOLEAN NOT NULL DEFAULT FALSE,
+  can_delete_messages BOOLEAN NOT NULL DEFAULT FALSE,
+  can_invite_users BOOLEAN NOT NULL DEFAULT FALSE,
+  can_pin_messages BOOLEAN NOT NULL DEFAULT FALSE,
+  PRIMARY KEY (chat_id, user_id)
+);
+ALTER TABLE chats ADD COLUMN IF NOT EXISTS pinned_message_id UUID NULL REFERENCES messages(id) ON DELETE SET NULL;

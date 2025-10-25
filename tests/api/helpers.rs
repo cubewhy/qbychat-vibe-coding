@@ -1,9 +1,10 @@
-use std::sync::Arc;
-use std::net::TcpListener;
-use actix_web::{App, web, HttpServer};
-use sqlx::postgres::PgPoolOptions;
-use qbychat_vibe_coding::{handlers, ws, run_migrations};
+use actix_web::{web, App, HttpServer};
+use qbychat_vibe_coding::gif::GifProvider;
 use qbychat_vibe_coding::state::AppState;
+use qbychat_vibe_coding::{handlers, run_migrations, ws};
+use sqlx::postgres::PgPoolOptions;
+use std::net::TcpListener;
+use std::sync::Arc;
 
 pub struct TestApp {
     pub address: String,
@@ -14,7 +15,8 @@ pub struct TestApp {
 
 impl TestApp {
     pub async fn spawn() -> anyhow::Result<Self> {
-        let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://app:password@localhost:5432/app".to_string());
+        let db_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://app:password@localhost:5432/app".to_string());
         let pool = PgPoolOptions::new()
             .max_connections(2)
             .acquire_timeout(std::time::Duration::from_secs(2))
@@ -28,14 +30,25 @@ impl TestApp {
 
         std::env::set_var("ADMIN_TOKEN", "test_admin");
         std::fs::create_dir_all("./.test-storage").ok();
-        let state = AppState { pool: pool.clone(), clients: Arc::new(dashmap::DashMap::new()), jwt_secret: Arc::new("testsecret".to_string()), storage_dir: Arc::new(std::path::PathBuf::from("./.test-storage")), redis: std::env::var("REDIS_URL").ok().and_then(|u| redis::Client::open(u).ok()) };
+        let state = AppState {
+            pool: pool.clone(),
+            clients: Arc::new(dashmap::DashMap::new()),
+            jwt_secret: Arc::new("testsecret".to_string()),
+            storage_dir: Arc::new(std::path::PathBuf::from("./.test-storage")),
+            redis: std::env::var("REDIS_URL")
+                .ok()
+                .and_then(|u| redis::Client::open(u).ok()),
+            gif_provider: GifProvider::from_env().map(Arc::new),
+        };
 
         let server = HttpServer::new(move || {
             App::new()
                 .app_data(web::Data::new(state.clone()))
                 .configure(handlers::config)
                 .service(ws::ws_route)
-                .default_service(web::route().to(|| async { actix_web::HttpResponse::NotFound().finish() }))
+                .default_service(
+                    web::route().to(|| async { actix_web::HttpResponse::NotFound().finish() }),
+                )
         })
         .listen(listener)?
         .run();
@@ -46,6 +59,11 @@ impl TestApp {
 
         let client = reqwest::Client::new();
 
-        Ok(TestApp { address, client, pool, _server: handle })
+        Ok(TestApp {
+            address,
+            client,
+            pool,
+            _server: handle,
+        })
     }
 }
