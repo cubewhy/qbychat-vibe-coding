@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod config;
 pub mod gif;
 pub mod handlers;
 pub mod models;

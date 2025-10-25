@@ -1,0 +1,26 @@
+server:
+  bind_addr: "0.0.0.0:8080"
+
+database:
+  url: "postgres://app:password@localhost:5432/app"
+
+auth:
+  jwt_secret: "devsecretchangeme"
+
+storage:
+  dir: "./storage"
+
+download:
+  token_ttl_secs: 1800
+
+redis:
+  url: null
+
+admin:
+  token: ""
+
+gif:
+  enabled: true
+  provider: "tenor"
+  base_url: "https://tenor.googleapis.com/v2"
+  api_key: null

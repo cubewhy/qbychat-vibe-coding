@@ -34,10 +34,7 @@ pub async fn create_download_token(
         .map_err(internal_err)?
         .ok_or_else(|| actix_web::error::ErrorNotFound("avatar not found"))?;
     let token = Uuid::new_v4().to_string();
-    let ttl = std::env::var("DOWNLOAD_TOKEN_TTL_SECS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(1800);
+    let ttl = state.download_token_ttl;
     let expires_at = chrono::Utc::now() + chrono::Duration::seconds(ttl as i64);
     if let Some(client) = &state.redis {
         let mut conn = client

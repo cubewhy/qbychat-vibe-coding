@@ -1,4 +1,6 @@
 use actix_web::{web, App, HttpServer};
+use dashmap::DashMap;
+use qbychat_vibe_coding::config::AppConfig;
 use qbychat_vibe_coding::gif::GifProvider;
 use qbychat_vibe_coding::state::AppState;
 use qbychat_vibe_coding::{handlers, run_migrations, ws};
@@ -28,17 +30,36 @@ impl TestApp {
         let port = listener.local_addr()?.port();
         let address = format!("http://127.0.0.1:{}", port);
 
-        std::env::set_var("ADMIN_TOKEN", "test_admin");
-        std::fs::create_dir_all("./.test-storage").ok();
+        let mut config = AppConfig::load()?;
+        config.database.url = db_url.clone();
+        config.server.bind_addr = format!("127.0.0.1:{}", port);
+        config.auth.jwt_secret = "testsecret".into();
+        config.admin.token = "test_admin".into();
+        config.download.token_ttl_secs = 60;
+        config.redis.url = std::env::var("REDIS_URL").ok();
+        config.gif.enabled = Some(false);
+        let storage_dir = format!("./.test-storage/{}", port);
+        std::fs::create_dir_all(&storage_dir).ok();
+        config.storage.dir = storage_dir.clone();
+
+        let shared_config = Arc::new(config);
+        let redis = shared_config
+            .redis
+            .url
+            .as_ref()
+            .and_then(|u| redis::Client::open(u.clone()).ok());
+        let gif_provider = GifProvider::from_config(&shared_config.gif).map(Arc::new);
+
         let state = AppState {
             pool: pool.clone(),
-            clients: Arc::new(dashmap::DashMap::new()),
-            jwt_secret: Arc::new("testsecret".to_string()),
-            storage_dir: Arc::new(std::path::PathBuf::from("./.test-storage")),
-            redis: std::env::var("REDIS_URL")
-                .ok()
-                .and_then(|u| redis::Client::open(u).ok()),
-            gif_provider: GifProvider::from_env().map(Arc::new),
+            clients: Arc::new(DashMap::new()),
+            config: shared_config.clone(),
+            jwt_secret: Arc::new(shared_config.auth.jwt_secret.clone()),
+            storage_dir: Arc::new(std::path::PathBuf::from(&shared_config.storage.dir)),
+            redis,
+            gif_provider,
+            download_token_ttl: shared_config.download.token_ttl_secs,
+            admin_token: Arc::new(shared_config.admin.token.clone()),
         };
 
         let server = HttpServer::new(move || {

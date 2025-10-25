@@ -2,6 +2,8 @@ use anyhow::{bail, Context};
 use reqwest::Client;
 use serde::Deserialize;
 
+use crate::config::GifConfig;
+
 #[derive(Clone)]
 pub struct GifProvider {
     client: Client,
@@ -28,12 +30,14 @@ impl GifProvider {
         }
     }
 
-    pub fn from_env() -> Option<Self> {
-        let base = std::env::var("GIF_PROVIDER_BASE_URL").ok()?;
-        let provider = std::env::var("GIF_PROVIDER").unwrap_or_else(|_| "tenor".to_string());
-        let api_key = std::env::var("GIF_PROVIDER_API_KEY").ok();
+    pub fn from_config(cfg: &GifConfig) -> Option<Self> {
+        if cfg.enabled == Some(false) {
+            return None;
+        }
+        let base = cfg.base_url.clone()?;
+        let provider = cfg.provider.clone().unwrap_or_else(|| "tenor".to_string());
         let client = Client::builder().build().ok()?;
-        Some(Self::new(&provider, base, api_key, client))
+        Some(Self::new(&provider, base, cfg.api_key.clone(), client))
     }
 
     pub fn provider(&self) -> &str {

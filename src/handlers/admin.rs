@@ -8,13 +8,12 @@ pub async fn purge_storage(
     state: web::Data<AppState>,
     req: actix_web::HttpRequest,
 ) -> actix_web::Result<HttpResponse> {
-    let admin_token = std::env::var("ADMIN_TOKEN").unwrap_or_default();
     let header = req
         .headers()
         .get("X-Admin-Token")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if admin_token.is_empty() || header != admin_token {
+    if state.admin_token.is_empty() || header != state.admin_token.as_str() {
         return Ok(HttpResponse::Unauthorized().finish());
     }
     let deleted = purge_unreferenced_internal(&state)
