@@ -7,3 +7,4 @@ mod admins;
 mod avatars;
 mod files;
 mod messages;
+mod members;

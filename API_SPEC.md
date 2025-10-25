@@ -179,6 +179,17 @@ Response 200:
 - Admin
   - POST /api/admin/reads/purge: delete message_reads_small older than 7 days
 
+### Members & Unread
+- Member entity: chat_members(chat_id, user_id, note, last_read_message_id, created_at)
+  - 创建时机：用户加入聊天时（direct/group/channel），会插入 chat_members 记录。
+  - last_read_message_id 用于按消息时间计算未读数量；消息删除不计入未读。
+- GET /api/chats/{chat_id}/unread_count
+  - 返回 {"unread": number}
+  - 逻辑：
+    - 取成员 last_read_message_id 对应消息时间 T，如果为空则 T=最小时间
+    - 统计该聊天中 created_at > T 且 is_deleted=false 的消息数量
+- 批量标记已读会推进 chat_members.last_read_message_id 为该批最新消息
+
 ## WebSocket
 
 Path: /ws?token=...

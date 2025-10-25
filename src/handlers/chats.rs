@@ -29,6 +29,8 @@ pub async fn create_group(state: web::Data<AppState>, req: web::Json<CreateGroup
         .execute(&mut *tx).await.map_err(internal_err)?;
     sqlx::query("INSERT INTO chat_participants (chat_id, user_id) VALUES ($1, $2)")
         .bind(chat_id).bind(user.0).execute(&mut *tx).await.map_err(internal_err)?;
+    sqlx::query("INSERT INTO chat_members (chat_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+        .bind(chat_id).bind(user.0).execute(&mut *tx).await.map_err(internal_err)?;
     tx.commit().await.map_err(internal_err)?;
     Ok(HttpResponse::Ok().json(serde_json::json!({ "chat_id": chat_id })))
 }
@@ -41,6 +43,8 @@ pub async fn create_channel(state: web::Data<AppState>, req: web::Json<CreateCha
         .bind(chat_id).bind(user.0).bind(&req.title)
         .execute(&mut *tx).await.map_err(internal_err)?;
     sqlx::query("INSERT INTO chat_participants (chat_id, user_id) VALUES ($1, $2)")
+        .bind(chat_id).bind(user.0).execute(&mut *tx).await.map_err(internal_err)?;
+    sqlx::query("INSERT INTO chat_members (chat_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
         .bind(chat_id).bind(user.0).execute(&mut *tx).await.map_err(internal_err)?;
     tx.commit().await.map_err(internal_err)?;
     Ok(HttpResponse::Ok().json(serde_json::json!({ "chat_id": chat_id })))
@@ -65,6 +69,8 @@ pub async fn add_participant(state: web::Data<AppState>, path: web::Path<Uuid>, 
         .ok_or_else(|| actix_web::error::ErrorNotFound("user not found"))?;
 
     sqlx::query("INSERT INTO chat_participants (chat_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+        .bind(chat_id).bind(peer.id).execute(&state.pool).await.map_err(internal_err)?;
+    sqlx::query("INSERT INTO chat_members (chat_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
         .bind(chat_id).bind(peer.id).execute(&state.pool).await.map_err(internal_err)?;
 
     Ok(HttpResponse::Ok().finish())
@@ -213,6 +219,8 @@ pub async fn ensure_direct_chat(pool: &Pool<Postgres>, a: Uuid, b: Uuid) -> anyh
     let mut tx = pool.begin().await?;
     sqlx::query("INSERT INTO chats (id, is_direct) VALUES ($1, TRUE)").bind(chat_id).execute(&mut *tx).await?;
     sqlx::query("INSERT INTO chat_participants (chat_id, user_id) VALUES ($1, $2), ($1, $3)").bind(chat_id).bind(a).bind(b).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO chat_members (chat_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING").bind(chat_id).bind(a).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO chat_members (chat_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING").bind(chat_id).bind(b).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(chat_id)
 }

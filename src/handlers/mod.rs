@@ -32,5 +32,6 @@ pub fn config(cfg: &mut web::ServiceConfig) {
        .service(messages::edit_message)
        .service(messages::delete_message)
        .service(messages::read_bulk)
-       .service(messages::purge_reads);
+       .service(messages::purge_reads)
+       .service(messages::unread_count);
 }
