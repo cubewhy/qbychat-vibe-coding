@@ -10,3 +10,4 @@ mod messages;
 mod members;
 mod clear;
 mod chat_list;
+mod messages_rich;

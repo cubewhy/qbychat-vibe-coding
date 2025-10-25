@@ -4,6 +4,7 @@ use sqlx::types::Uuid;
 use crate::state::AppState;
 use crate::auth::{AuthUser, internal_err};
 use crate::models::{CreateDirectChatReq, CreateGroupReq, CreateChannelReq, AddParticipantReq, AdminReq, MuteReq, UnmuteReq, ListQuery, MessageRow};
+use std::collections::HashMap;
 
 #[post("/api/chats/direct")]
 pub async fn start_direct_chat(state: web::Data<AppState>, req: web::Json<CreateDirectChatReq>, user: AuthUser) -> actix_web::Result<HttpResponse> {

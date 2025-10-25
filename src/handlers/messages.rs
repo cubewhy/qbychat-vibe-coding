@@ -5,7 +5,7 @@ use crate::state::AppState;
 use crate::auth::{AuthUser, internal_err};
 
 #[derive(Deserialize)]
-pub struct SendMessageReq { pub content: String }
+pub struct SendMessageReq { pub content: String, pub attachment_ids: Option<Vec<Uuid>>, pub reply_to_message_id: Option<Uuid> }
 
 #[post("/api/chats/{chat_id}/messages")]
 pub async fn send_message(state: web::Data<AppState>, path: web::Path<Uuid>, user: AuthUser, req: web::Json<SendMessageReq>) -> actix_web::Result<HttpResponse> {
@@ -13,10 +13,26 @@ pub async fn send_message(state: web::Data<AppState>, path: web::Path<Uuid>, use
     let is_member = sqlx::query_scalar::<_, Option<i64>>("SELECT 1 FROM chat_participants WHERE chat_id = $1 AND user_id = $2")
         .bind(chat_id).bind(user.0).fetch_one(&state.pool).await.map_err(internal_err)?.is_some();
     if !is_member { return Ok(HttpResponse::Forbidden().finish()); }
+    // validate reply_to belongs to same chat when provided
+    if let Some(rid) = req.reply_to_message_id {
+        let ok = sqlx::query_scalar::<_, Option<i64>>("SELECT 1 FROM messages WHERE id = $1 AND chat_id = $2")
+            .bind(rid).bind(chat_id).fetch_one(&state.pool).await.map_err(internal_err)?.is_some();
+        if !ok { return Ok(HttpResponse::BadRequest().body("invalid reply_to_message_id")); }
+    }
     let id = Uuid::new_v4();
-    sqlx::query("INSERT INTO messages (id, chat_id, sender_id, content) VALUES ($1,$2,$3,$4)")
-        .bind(id).bind(chat_id).bind(user.0).bind(req.content.trim())
+    sqlx::query("INSERT INTO messages (id, chat_id, sender_id, content, reply_to_message_id) VALUES ($1,$2,$3,$4,$5)")
+        .bind(id).bind(chat_id).bind(user.0).bind(req.content.trim()).bind(req.reply_to_message_id)
         .execute(&state.pool).await.map_err(internal_err)?;
+
+    // attachments
+    if let Some(att) = &req.attachment_ids { for fid in att { 
+        // ensure file exists
+        let exists = sqlx::query_scalar::<_, Option<i64>>("SELECT 1 FROM storage_files WHERE id = $1")
+            .bind(fid).fetch_one(&state.pool).await.map_err(internal_err)?.is_some();
+        if !exists { return Ok(HttpResponse::BadRequest().body("invalid attachment id")); }
+        sqlx::query("INSERT INTO message_attachments (message_id, file_id) VALUES ($1,$2) ON CONFLICT DO NOTHING")
+            .bind(id).bind(fid).execute(&state.pool).await.map_err(internal_err)?;
+    }}
 
     // naive mention detection: find @username mentions and append message id for mentioned members
     let content = req.content.trim().to_string();

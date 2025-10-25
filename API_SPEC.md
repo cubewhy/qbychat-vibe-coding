@@ -186,7 +186,11 @@ Response 200:
 ### Messages
 
 - POST /api/chats/{chat_id}/messages
-  - Send a message in a chat you joined. Request: {"content":"string"}. Returns {"id":"uuid"}
+  - Send a message in a chat you joined. Returns {"id":"uuid"}
+  - Request fields:
+    - content: string
+    - attachment_ids: [uuid] — optional, references uploaded files for images/videos/voice/files
+    - reply_to_message_id: uuid — optional, reply to an existing message in same chat
 - POST /api/messages/{message_id}/edit
   - Edit own message. Request: {"content":"string"}. 403 if not owner or message deleted. Sets edited_at.
 - POST /api/messages/{message_id}/delete
