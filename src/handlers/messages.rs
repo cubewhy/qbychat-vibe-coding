@@ -5,8 +5,9 @@ use sqlx::types::Uuid;
 use tracing::instrument;
 
 use crate::auth::{internal_err, AuthUser};
-use crate::models::ForwardMessagesReq;
+use crate::models::{ForwardMessagesReq, MessageRow};
 use crate::state::AppState;
+use crate::ws::ServerWsMsg;
 
 #[derive(Deserialize)]
 pub struct SendMessageReq {
@@ -27,7 +28,7 @@ pub async fn send_message(
     ensure_can_send(&state, chat_id, user.0).await?;
 
     if let Some(rid) = req.reply_to_message_id {
-        let ok = sqlx::query_scalar::<_, Option<i64>>(
+        let ok = sqlx::query_scalar::<_, Option<i32>>(
             "SELECT 1 FROM messages WHERE id = $1 AND chat_id = $2",
         )
         .bind(rid)
@@ -65,7 +66,7 @@ pub async fn send_message(
     if let Some(att) = &req.attachment_ids {
         for fid in att {
             let exists =
-                sqlx::query_scalar::<_, Option<i64>>("SELECT 1 FROM storage_files WHERE id = $1")
+                sqlx::query_scalar::<_, Option<i32>>("SELECT 1 FROM storage_files WHERE id = $1")
                     .bind(fid)
                     .fetch_one(&state.pool)
                     .await
@@ -111,6 +112,32 @@ pub async fn edit_message(
     if res.rows_affected() == 0 {
         return Ok(HttpResponse::Forbidden().finish());
     }
+
+    // Broadcast message_edited
+    if let Some(updated) = sqlx::query_as::<_, MessageRow>(
+        "SELECT id, chat_id, sender_id, content, created_at, edited_at FROM messages WHERE id = $1",
+    )
+    .bind(message_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(internal_err)?
+    {
+        let chat_id = updated.chat_id;
+        let participants = sqlx::query_scalar::<_, Uuid>(
+            "SELECT user_id FROM chat_participants WHERE chat_id = $1",
+        )
+        .bind(chat_id)
+        .fetch_all(&state.pool)
+        .await
+        .map_err(internal_err)?;
+        let msg = ServerWsMsg::MessageEdited { message: updated };
+        for uid in participants {
+            if let Some(tx) = state.clients.get(&uid) {
+                let _ = tx.send(msg.clone());
+            }
+        }
+    }
+
     Ok(HttpResponse::Ok().finish())
 }
 
@@ -130,6 +157,29 @@ pub async fn delete_message(
     if res.rows_affected() == 0 {
         return Ok(HttpResponse::Forbidden().finish());
     }
+
+    // Broadcast message_deleted
+    if let Some(chat_id) = sqlx::query_scalar::<_, Uuid>("SELECT chat_id FROM messages WHERE id = $1")
+        .bind(message_id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(internal_err)?
+    {
+        let participants = sqlx::query_scalar::<_, Uuid>(
+            "SELECT user_id FROM chat_participants WHERE chat_id = $1",
+        )
+        .bind(chat_id)
+        .fetch_all(&state.pool)
+        .await
+        .map_err(internal_err)?;
+        let msg = ServerWsMsg::MessageDeleted { chat_id, message_ids: vec![message_id] };
+        for uid in participants {
+            if let Some(tx) = state.clients.get(&uid) {
+                let _ = tx.send(msg.clone());
+            }
+        }
+    }
+
     Ok(HttpResponse::Ok().finish())
 }
 
@@ -566,7 +616,7 @@ pub(crate) async fn ensure_member(
     chat_id: Uuid,
     user_id: Uuid,
 ) -> Result<bool, actix_web::Error> {
-    let is_member = sqlx::query_scalar::<_, Option<i64>>(
+    let is_member = sqlx::query_scalar::<_, Option<i32>>(
         "SELECT 1 FROM chat_participants WHERE chat_id = $1 AND user_id = $2",
     )
     .bind(chat_id)

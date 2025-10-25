@@ -92,5 +92,6 @@ pub fn internal_err<E: std::fmt::Debug>(e: E) -> actix_web::Error {
     actix_web::error::ErrorInternalServerError(format!("{:?}", e))
 }
 pub fn conflict_or_internal<E: std::fmt::Debug>(e: E) -> actix_web::Error {
+    eprintln!("err: {:?}", e);
     actix_web::error::ErrorConflict(format!("{:?}", e))
 }

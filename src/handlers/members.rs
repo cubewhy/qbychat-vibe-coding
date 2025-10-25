@@ -37,7 +37,7 @@ async fn ensure_member(
     chat_id: Uuid,
     user_id: Uuid,
 ) -> Result<bool, actix_web::Error> {
-    let is_member = sqlx::query_scalar::<_, Option<i64>>(
+    let is_member = sqlx::query_scalar::<_, Option<i32>>(
         "SELECT 1 FROM chat_participants WHERE chat_id = $1 AND user_id = $2",
     )
     .bind(chat_id)

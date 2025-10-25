@@ -225,36 +225,14 @@ async fn listing_includes_receipts_and_pin_state() -> anyhow::Result<()> {
         }
     };
 
-    let token_a = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"rca","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let token_b = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"rcb","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let (token_a, _username_a) = app.register_user_with_username("rca").await?;
+    let (token_b, username_b) = app.register_user_with_username("rcb").await?;
 
     let dm = app
         .client
         .post(format!("{}/api/chats/direct", app.address))
         .bearer_auth(&token_a)
-        .json(&json!({"peer_username":"rcb"}))
+        .json(&json!({"peer_username": username_b}))
         .send()
         .await?
         .json::<serde_json::Value>()

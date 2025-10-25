@@ -51,12 +51,22 @@ async fn owner_grants_perms_and_pin_and_invite() -> anyhow::Result<()> {
         .unwrap()
         .to_string();
 
+    // add m1 to group
+    let res = app
+        .client
+        .post(format!("{}/api/chats/{}/participants", app.address, gid))
+        .bearer_auth(&token_owner)
+        .json(&json!({"username":"m1"}))
+        .send()
+        .await?;
+    assert!(res.status().is_success());
+
     // grant admin perms to m1
     let res = app
         .client
         .post(format!("{}/api/chats/{}/admins", app.address, gid))
         .bearer_auth(&token_owner)
-        .json(&json!({"username":"m1","can_invite_users":true,"can_pin_messages":true}))
+        .json(&json!({"username":"m1","permissions":{"can_change_info":false,"can_delete_messages":false,"can_invite_users":true,"can_pin_messages":true,"can_manage_members":false}}))
         .send()
         .await?;
     assert!(res.status().is_success());
@@ -193,25 +203,27 @@ async fn admin_without_manage_perm_cannot_remove_member() -> anyhow::Result<()> 
         .and_then(|v| v.as_str())
         .unwrap()
         .to_string();
-    app.client
+    let res = app.client
         .post(format!("{}/api/chats/{}/participants", app.address, gid))
         .bearer_auth(&owner)
         .json(&json!({"username":"adm"}))
         .send()
         .await?;
-    app.client
+    assert!(res.status().is_success());
+    let res = app.client
         .post(format!("{}/api/chats/{}/participants", app.address, gid))
         .bearer_auth(&owner)
         .json(&json!({"username":"victim"}))
         .send()
         .await?;
+    assert!(res.status().is_success());
 
     // grant admin without manage perms
     let res = app
         .client
         .post(format!("{}/api/chats/{}/admins", app.address, gid))
         .bearer_auth(&owner)
-        .json(&json!({"username":"adm","permissions":{"can_invite_users":true}}))
+        .json(&json!({"username":"adm","permissions":{"can_change_info":false,"can_delete_messages":false,"can_invite_users":true,"can_pin_messages":false,"can_manage_members":false}}))
         .send()
         .await?;
     assert!(res.status().is_success());

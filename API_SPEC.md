@@ -406,3 +406,177 @@ Notes:
 
 - Server broadcasts message to all chat participants with active WS connections.
 - Use HTTP API to fetch history.
+
+### WebSocket Real-Time Experience Module Detailed Design Specification
+
+#### I. Core Concept
+
+The current WebSocket is used for one-way broadcasting of new messages. We will extend it to enable bidirectional communication and handle various real-time events. The core concept is: **Any state update that may cause changes in the user interface (UI) should be pushed in real-time to relevant clients via WebSocket, avoiding clients polling HTTP APIs to refresh status.**
+
+This includes:
+1. **Typing status**: "The other party is typing..."
+2. **Message status changes**: Messages being edited or deleted.
+3. **Read receipts**: "Double check" in private chats, read count updates in group chats.
+4. **User online status**: Online status of friends/chat members ("online" or "last seen time").
+5. **Chat metadata changes**: Messages being pinned, group info being modified, etc.
+
+#### II. WebSocket Message Structure
+
+We will unify the message format for client and server, all messages are JSON objects containing `type` and `payload` fields.
+
+```json
+{
+  "type": "string (event type)",
+  "payload": { ... } // object (specific data of the event)
+}
+```
+
+#### III. Client -> Server (C2S) Events
+
+Clients need to actively report some instantaneous statuses to the server.
+
+##### 1. `start_typing`
+Sent when the user starts typing in the input box of a chat window.
+
+* **`type`**: `"start_typing"`
+* **`payload`**:
+    ```json
+    {
+      "chat_id": "uuid"
+    }
+    ```
+* **Server logic**:
+    1. Upon receipt, record the user's typing status in this `chat_id`, and set a 5-second timeout.
+    2. Broadcast a `typing_indicator` event to **other** online members in this chat.
+    3. If another `start_typing` from the same user is received within 5 seconds, reset the timeout.
+    4. If timeout, consider the user has stopped typing, can broadcast a stop event (optional, better to let client handle timeout).
+
+##### 2. `mark_as_read`
+Sent when the user's viewport scrolls to a message, marking it as "read". This is more real-time than `read_bulk` HTTP API.
+
+* **`type`**: `"mark_as_read"`
+* **`payload`**:
+    ```json
+    {
+      "chat_id": "uuid",
+      "last_read_message_id": "uuid" // The ID of the latest message visible in the user's viewport
+    }
+    ```
+* **Server logic**:
+    1. Verify the user is a member of this chat.
+    2. Update the user's `chat_members.last_read_message_id` in the database.
+    3. Trigger a `messages_read` event, broadcast to required clients (see below).
+
+#### IV. Server -> Client (S2C) Events
+
+This is the core of real-time experience, the server needs to push various types of events to clients based on different business logic.
+
+##### 1. `new_message` (replaces the original `message`)
+Broadcast when there is a new message.
+
+* **`type`**: `"new_message"`
+* **`payload`**:
+    * Complete message object, structure consistent with a single message returned by `GET /api/chats/{chat_id}/messages`.
+
+##### 2. `typing_indicator`
+Broadcast user's typing status.
+
+* **`type`**: `"typing_indicator"`
+* **`payload`**:
+    ```json
+    {
+      "chat_id": "uuid",
+      "user": {
+        "id": "uuid",
+        "username": "string"
+      }
+    }
+    ```
+* **Client logic**: Upon receipt, display "username is typing..." in the corresponding chat window title bar or at the bottom of the message list, and set a 6-second timer, hide the prompt automatically after timeout.
+
+##### 3. `message_edited`
+Broadcast when a message is edited.
+
+* **`type`**: `"message_edited"`
+* **`payload`**:
+    * **Complete, updated message object**. This allows the client to directly replace the old message in local cache without reassembly.
+
+##### 4. `message_deleted`
+Broadcast when one (or more) messages are deleted.
+
+* **`type`**: `"message_deleted"`
+* **`payload`**:
+    ```json
+    {
+      "chat_id": "uuid",
+      "message_ids": ["uuid", "uuid", ...]
+    }
+    ```
+* **Client logic**: Find these messages in local data, and handle according to the app's UI/UX rules (e.g., replace content with "[Message deleted]" or remove directly).
+
+##### 5. `messages_read`
+Pushed when a user's read status is updated. This is the most complex event, requiring differentiation of push targets based on scenarios.
+
+* **`type`**: `"messages_read"`
+* **`payload`**:
+    ```json
+    {
+      "chat_id": "uuid",
+      "reader_user_id": "uuid", // Who read
+      "last_read_message_id": "uuid", // The latest message ID this user has read
+      "read_count": 13, // (Groups only) New total read count for this message
+      "is_read_by_peer": true // (Private chats only) Whether the peer has read
+    }
+    ```
+* **Push logic**:
+    * **Scenario A: Private chat**
+        * When user A reads messages in private chat with B, server **pushes this event only to all online devices of user B**.
+    * **Scenario B: Group chat**
+        * When user A reads messages in group chat, server **pushes this event only to the message sender**, to update the read count on sender's UI.
+    * **Scenario C: User's own multi-device sync**
+        * When user A reads messages on device 1, server needs to **push this event to user A's other online devices (device 2, 3)**, so they can sync to clear unread badges.
+
+##### 6. `presence_update`
+Broadcast user's online status changes.
+
+* **`type`**: `"presence_update"`
+* **`payload`**:
+    ```json
+    {
+      "user_id": "uuid",
+      "status": "online" | "offline",
+      "last_seen_at": "RFC3339|null" // Provided when status is offline
+    }
+    ```
+* **Push logic**:
+    * Requires an online status service (usually implemented with Redis).
+    * When user WebSocket connection is established, mark as `online`, and broadcast `presence_update` to all online users who have **common chats** with them.
+    * When user WebSocket disconnects (needs heartbeat and timeout mechanism), mark as `offline` and record `last_seen_at`, then broadcast.
+
+##### 7. `chat_action`
+A general chat action event, for handling non-message updates.
+
+* **`type`**: `"chat_action"`
+* **`payload`**:
+    ```json
+    {
+      "chat_id": "uuid",
+      "action_type": "message_pinned" | "chat_info_updated" | "user_joined" | "user_left",
+      "data": { ... } // Data related to the action
+    }
+    ```
+* **`data` examples**:
+    * For `message_pinned`, `data` can be `{ "pinned_message": MessageObject }`.
+    * For `chat_info_updated`, `data` can be `{ "new_title": "New Title" }`.
+    * For `user_joined`, `data` can be `{ "user": { "id": "uuid", "username": "string" } }`.
+
+---
+
+#### V. HTTP API and WebSocket Integration
+
+Now, after completing database operations, your HTTP API also needs to trigger corresponding WebSocket events.
+
+* **`POST /api/messages/{message_id}/edit`**: After success, broadcast `message_edited` event to this `chat_id`.
+* **`POST /api/messages/{message_id}/delete`**: After success, broadcast `message_deleted` event to this `chat_id`.
+* **`POST /api/chats/{chat_id}/pin_message`**: After success, broadcast `chat_action` (type: `message_pinned`) event to this `chat_id`.
+* **`POST /api/chats/{chat_id}/remove`**: After success, broadcast `chat_action` (type: `user_left`) event to this `chat_id`.

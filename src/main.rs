@@ -41,6 +41,8 @@ async fn main() -> anyhow::Result<()> {
         gif_provider,
         download_token_ttl: config.download.token_ttl_secs,
         admin_token: Arc::new(config.admin.token.clone()),
+        typing: Arc::new(dashmap::DashMap::new()),
+        presence: Arc::new(dashmap::DashMap::new()),
     };
 
     info!("listening on {}", config.server.bind_addr);

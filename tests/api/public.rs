@@ -11,30 +11,8 @@ async fn public_search_and_join_flow() -> anyhow::Result<()> {
         }
     };
 
-    let owner = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"pub_owner","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let seeker = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"pub_seeker","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let owner = app.register_user("pub_owner").await?;
+    let seeker = app.register_user("pub_seeker").await?;
 
     let gid = app
         .client
@@ -97,30 +75,8 @@ async fn handle_conflict_bad_path() -> anyhow::Result<()> {
         }
     };
 
-    let owner1 = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"pub_owner1","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
-    let owner2 = app
-        .client
-        .post(format!("{}/api/register", app.address))
-        .json(&json!({"username":"pub_owner2","password":"secretpw"}))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?
-        .get("token")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .to_string();
+    let owner1 = app.register_user("pub_owner1").await?;
+    let owner2 = app.register_user("pub_owner2").await?;
 
     let g1 = app
         .client

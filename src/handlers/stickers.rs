@@ -24,7 +24,7 @@ pub async fn create_pack(
         return Ok(HttpResponse::BadRequest().body("invalid short_name"));
     }
     let exists =
-        sqlx::query_scalar::<_, Option<i64>>("SELECT 1 FROM sticker_packs WHERE short_name = $1")
+        sqlx::query_scalar::<_, Option<i32>>("SELECT 1 FROM sticker_packs WHERE short_name = $1")
             .bind(&short)
             .fetch_one(&state.pool)
             .await
@@ -69,7 +69,7 @@ pub async fn add_sticker(
     if owner_id != user.0 {
         return Ok(HttpResponse::Forbidden().finish());
     }
-    let exists = sqlx::query_scalar::<_, Option<i64>>("SELECT 1 FROM storage_files WHERE id = $1")
+    let exists = sqlx::query_scalar::<_, Option<i32>>("SELECT 1 FROM storage_files WHERE id = $1")
         .bind(req.file_id)
         .fetch_one(&state.pool)
         .await
@@ -98,7 +98,7 @@ pub async fn install_pack(
     user: AuthUser,
 ) -> actix_web::Result<HttpResponse> {
     let pack_id = path.into_inner();
-    let exists = sqlx::query_scalar::<_, Option<i64>>("SELECT 1 FROM sticker_packs WHERE id = $1")
+    let exists = sqlx::query_scalar::<_, Option<i32>>("SELECT 1 FROM sticker_packs WHERE id = $1")
         .bind(pack_id)
         .fetch_one(&state.pool)
         .await
@@ -181,7 +181,7 @@ pub async fn send_sticker(
     .ok_or_else(|| actix_web::error::ErrorNotFound("sticker not found"))?;
 
     if sticker.created_by != user.0 {
-        let installed = sqlx::query_scalar::<_, Option<i64>>(
+        let installed = sqlx::query_scalar::<_, Option<i32>>(
             "SELECT 1 FROM user_sticker_packs WHERE user_id = $1 AND pack_id = $2",
         )
         .bind(user.0)

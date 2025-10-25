@@ -13,6 +13,7 @@ use crate::models::{
     PromoteAdminReq, SetVisibilityReq, SimpleUserDto, StickerMessageDto,
 };
 use crate::state::AppState;
+use crate::ws::ServerWsMsg;
 
 use std::collections::HashMap;
 
@@ -43,7 +44,7 @@ async fn ensure_member(
     chat_id: Uuid,
     user_id: Uuid,
 ) -> Result<bool, actix_web::Error> {
-    let is_member = sqlx::query_scalar::<_, Option<i64>>(
+    let is_member = sqlx::query_scalar::<_, Option<i32>>(
         "SELECT 1 FROM chat_participants WHERE chat_id = $1 AND user_id = $2",
     )
     .bind(chat_id)
@@ -420,6 +421,26 @@ pub async fn remove_participant(
         .await
         .map_err(internal_err)?;
     tx.commit().await.map_err(internal_err)?;
+
+    // Broadcast chat_action
+    let participants = sqlx::query_scalar::<_, Uuid>(
+        "SELECT user_id FROM chat_participants WHERE chat_id = $1",
+    )
+    .bind(chat_id)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(internal_err)?;
+    let msg = ServerWsMsg::ChatAction {
+        chat_id,
+        action_type: "user_left".to_string(),
+        data: serde_json::json!({ "user": { "id": target.id, "username": req.username } }),
+    };
+    for uid in participants {
+        if let Some(tx) = state.clients.get(&uid) {
+            let _ = tx.send(msg.clone());
+        }
+    }
+
     Ok(HttpResponse::Ok().finish())
 }
 
@@ -1105,7 +1126,7 @@ pub async fn set_visibility(
         {
             return Ok(HttpResponse::BadRequest().body("invalid handle"));
         }
-        let exists = sqlx::query_scalar::<_, Option<i64>>(
+        let exists = sqlx::query_scalar::<_, Option<i32>>(
             "SELECT 1 FROM chats WHERE public_handle = $1 AND id <> $2",
         )
         .bind(h)

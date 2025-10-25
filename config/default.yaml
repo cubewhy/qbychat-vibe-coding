@@ -2,7 +2,7 @@ server:
   bind_addr: "0.0.0.0:8080"
 
 database:
-  url: "postgres://app:password@localhost:5432/app"
+  url: "postgres://app:password@127.0.0.1:5432/app"
 
 auth:
   jwt_secret: "devsecretchangeme"
@@ -14,7 +14,7 @@ download:
   token_ttl_secs: 1800
 
 redis:
-  url: null
+  url: "redis://127.0.0.1:6379"
 
 admin:
   token: ""

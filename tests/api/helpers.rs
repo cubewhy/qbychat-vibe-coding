@@ -4,14 +4,17 @@ use qbychat_vibe_coding::config::AppConfig;
 use qbychat_vibe_coding::gif::GifProvider;
 use qbychat_vibe_coding::state::AppState;
 use qbychat_vibe_coding::{handlers, run_migrations, ws};
+use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use std::net::TcpListener;
+use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 
 pub struct TestApp {
     pub address: String,
     pub client: reqwest::Client,
     pub pool: sqlx::PgPool,
+    user_counter: std::sync::atomic::AtomicU32,
     _server: tokio::task::JoinHandle<()>,
 }
 
@@ -25,6 +28,12 @@ impl TestApp {
             .connect(&db_url)
             .await?;
         run_migrations(&pool).await?;
+        // Clean up for tests
+        sqlx::query("TRUNCATE users CASCADE").execute(&pool).await.ok();
+        sqlx::query("TRUNCATE chats CASCADE").execute(&pool).await.ok();
+        sqlx::query("TRUNCATE messages CASCADE").execute(&pool).await.ok();
+        sqlx::query("TRUNCATE chat_participants CASCADE").execute(&pool).await.ok();
+        sqlx::query("TRUNCATE chat_admin_permissions CASCADE").execute(&pool).await.ok();
 
         let listener = TcpListener::bind("127.0.0.1:0")?;
         let port = listener.local_addr()?.port();
@@ -60,7 +69,11 @@ impl TestApp {
             gif_provider,
             download_token_ttl: shared_config.download.token_ttl_secs,
             admin_token: Arc::new(shared_config.admin.token.clone()),
+            typing: Arc::new(DashMap::new()),
+            presence: Arc::new(DashMap::new()),
         };
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
 
         let server = HttpServer::new(move || {
             App::new()
@@ -75,16 +88,77 @@ impl TestApp {
         .run();
 
         let handle = tokio::spawn(async move {
+            tx.send(()).ok();
             let _ = server.await;
         });
 
-        let client = reqwest::Client::new();
+        // Wait for server to start
+        rx.await.ok();
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+
+        let client = reqwest::Client::builder().pool_max_idle_per_host(0).build().unwrap();
 
         Ok(TestApp {
             address,
             client,
             pool,
+            user_counter: AtomicU32::new(0),
             _server: handle,
         })
+    }
+
+    pub async fn register_user(&self, base_username: &str) -> anyhow::Result<String> {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let username = format!("{}_{}", base_username, timestamp);
+        let resp = self
+            .client
+            .post(format!("{}/api/register", self.address))
+            .header("Connection", "close")
+            .json(&json!({"username": username, "password": "secretpw"}))
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await?;
+            anyhow::bail!("Registration failed: status {}, body: {}", status, text);
+        }
+        let token = resp
+            .json::<serde_json::Value>()
+            .await?
+            .get("token")
+            .and_then(|v| v.as_str())
+            .unwrap()
+            .to_string();
+        Ok(token)
+    }
+
+    pub async fn register_user_with_username(&self, base_username: &str) -> anyhow::Result<(String, String)> {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let username = format!("{}_{}", base_username, timestamp);
+        let resp = self
+            .client
+            .post(format!("{}/api/register", self.address))
+            .header("Connection", "close")
+            .json(&json!({"username": username.clone(), "password": "secretpw"}))
+            .send()
+            .await?;
+        let status = resp.status();
+        let text = resp.text().await?;
+        if !status.is_success() {
+            anyhow::bail!("Registration failed: status {}, body: {}", status, text);
+        }
+        let v: serde_json::Value = serde_json::from_str(&text)?;
+        let token = v
+            .get("token")
+            .and_then(|v| v.as_str())
+            .unwrap()
+            .to_string();
+        Ok((token, username))
     }
 }

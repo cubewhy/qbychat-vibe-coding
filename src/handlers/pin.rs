@@ -1,5 +1,7 @@
 use crate::auth::{internal_err, AuthUser};
+use crate::models::MessageRow;
 use crate::state::AppState;
+use crate::ws::ServerWsMsg;
 use actix_web::{post, web, HttpResponse};
 use sqlx::types::Uuid;
 
@@ -40,7 +42,7 @@ pub async fn pin_message(
     }
     // message must be in chat
     let ok =
-        sqlx::query_scalar::<_, Option<i64>>("SELECT 1 FROM messages WHERE id=$1 AND chat_id=$2")
+        sqlx::query_scalar::<_, Option<i32>>("SELECT 1 FROM messages WHERE id=$1 AND chat_id=$2")
             .bind(message_id)
             .bind(chat_id)
             .fetch_one(&state.pool)
@@ -56,6 +58,35 @@ pub async fn pin_message(
         .execute(&state.pool)
         .await
         .map_err(internal_err)?;
+
+    // Broadcast chat_action
+    if let Some(pinned_msg) = sqlx::query_as::<_, MessageRow>(
+        "SELECT id, chat_id, sender_id, content, created_at, edited_at FROM messages WHERE id = $1",
+    )
+    .bind(message_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(internal_err)?
+    {
+        let participants = sqlx::query_scalar::<_, Uuid>(
+            "SELECT user_id FROM chat_participants WHERE chat_id = $1",
+        )
+        .bind(chat_id)
+        .fetch_all(&state.pool)
+        .await
+        .map_err(internal_err)?;
+        let msg = ServerWsMsg::ChatAction {
+            chat_id,
+            action_type: "message_pinned".to_string(),
+            data: serde_json::json!({ "pinned_message": pinned_msg }),
+        };
+        for uid in participants {
+            if let Some(tx) = state.clients.get(&uid) {
+                let _ = tx.send(msg.clone());
+            }
+        }
+    }
+
     Ok(HttpResponse::Ok().finish())
 }
 
@@ -92,5 +123,25 @@ pub async fn unpin_message(
         .execute(&state.pool)
         .await
         .map_err(internal_err)?;
+
+    // Broadcast chat_action
+    let participants = sqlx::query_scalar::<_, Uuid>(
+        "SELECT user_id FROM chat_participants WHERE chat_id = $1",
+    )
+    .bind(chat_id)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(internal_err)?;
+    let msg = ServerWsMsg::ChatAction {
+        chat_id,
+        action_type: "message_unpinned".to_string(),
+        data: serde_json::json!({}),
+    };
+    for uid in participants {
+        if let Some(tx) = state.clients.get(&uid) {
+            let _ = tx.send(msg.clone());
+        }
+    }
+
     Ok(HttpResponse::Ok().finish())
 }

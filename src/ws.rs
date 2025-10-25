@@ -1,6 +1,6 @@
 use crate::auth::{decode_token, extract_bearer};
 use crate::models::MessageRow;
-use crate::state::AppState;
+use crate::state::{AppState, PresenceStatus};
 use actix_web::{get, web, HttpRequest, HttpResponse, Responder};
 use actix_ws::{Message, MessageStream, Session};
 use futures_util::StreamExt;
@@ -14,15 +14,42 @@ use tracing::{error, info};
 pub enum ClientWsMsg {
     #[serde(rename = "send_message")]
     SendMessage { chat_id: Uuid, content: String },
+    #[serde(rename = "start_typing")]
+    StartTyping { chat_id: Uuid },
+    #[serde(rename = "mark_as_read")]
+    MarkAsRead { chat_id: Uuid, last_read_message_id: Uuid },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type")]
 pub enum ServerWsMsg {
-    #[serde(rename = "message")]
-    Message { message: MessageRow },
+    #[serde(rename = "new_message")]
+    NewMessage { message: MessageRow },
     #[serde(rename = "error")]
     Error { message: String },
+    #[serde(rename = "typing_indicator")]
+    TypingIndicator { chat_id: Uuid, user: UserInfo },
+    #[serde(rename = "message_edited")]
+    MessageEdited { message: MessageRow },
+    #[serde(rename = "message_deleted")]
+    MessageDeleted { chat_id: Uuid, message_ids: Vec<Uuid> },
+    #[serde(rename = "messages_read")]
+    MessagesRead { chat_id: Uuid, reader_user_id: Uuid, last_read_message_id: Uuid, read_count: Option<i32>, is_read_by_peer: Option<bool> },
+    #[serde(rename = "presence_update")]
+    PresenceUpdate { user_id: Uuid, status: String, last_seen_at: Option<String> },
+    #[serde(rename = "chat_action")]
+    ChatAction { chat_id: Uuid, action_type: String, data: serde_json::Value },
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct UserInfo {
+    pub id: Uuid,
+    pub username: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct UserIdRow {
+    user_id: Uuid,
 }
 
 #[get("/ws")]
@@ -60,8 +87,27 @@ async fn ws_session(
     mut stream: MessageStream,
 ) {
     let (tx, mut rx) = mpsc::unbounded_channel::<ServerWsMsg>();
-    state.clients.insert(user_id, tx);
+    state.clients.insert(user_id, tx.clone());
     info!(%user_id, "ws connected");
+
+    // Set presence online
+    state.presence.insert(user_id, PresenceStatus {
+        status: "online".to_string(),
+        last_seen_at: None,
+    });
+
+    // Broadcast presence update to users with common chats
+    let common_users = get_common_chat_users(&state, user_id).await;
+    let presence_msg = ServerWsMsg::PresenceUpdate {
+        user_id,
+        status: "online".to_string(),
+        last_seen_at: None,
+    };
+    for uid in common_users {
+        if let Some(tx) = state.clients.get(&uid) {
+            let _ = tx.send(presence_msg.clone());
+        }
+    }
 
     let mut closed = false;
     while !closed {
@@ -88,6 +134,27 @@ async fn ws_session(
     }
 
     state.clients.remove(&user_id);
+
+    // Set presence offline
+    let now = chrono::Utc::now();
+    state.presence.insert(user_id, PresenceStatus {
+        status: "offline".to_string(),
+        last_seen_at: Some(now),
+    });
+
+    // Broadcast presence update
+    let common_users = get_common_chat_users(&state, user_id).await;
+    let presence_msg = ServerWsMsg::PresenceUpdate {
+        user_id,
+        status: "offline".to_string(),
+        last_seen_at: Some(now.to_rfc3339()),
+    };
+    for uid in common_users {
+        if let Some(tx) = state.clients.get(&uid) {
+            let _ = tx.send(presence_msg.clone());
+        }
+    }
+
     info!(%user_id, "ws disconnected");
 }
 
@@ -168,12 +235,130 @@ async fn handle_ws_text(state: &AppState, user_id: Uuid, txt: &str) -> anyhow::R
             .fetch_all(&state.pool)
             .await?;
 
-            let server_msg = ServerWsMsg::Message {
+            let server_msg = ServerWsMsg::NewMessage {
                 message: saved.clone(),
             };
             for p in participants {
                 if let Some(tx) = state.clients.get(&p.user_id) {
                     let _ = tx.send(server_msg.clone());
+                }
+            }
+        }
+        ClientWsMsg::StartTyping { chat_id } => {
+            // Check if member
+            let is_member = sqlx::query("SELECT 1 FROM chat_participants WHERE chat_id = $1 AND user_id = $2")
+                .bind(chat_id)
+                .bind(user_id)
+                .fetch_optional(&state.pool)
+                .await?;
+            if is_member.is_none() {
+                return Ok(());
+            }
+
+            // Record typing
+            state.typing.insert((chat_id, user_id), tokio::time::Instant::now());
+
+            // Get username
+            #[derive(sqlx::FromRow)]
+            struct UserRow {
+                username: String,
+            }
+            let user_row = sqlx::query_as::<_, UserRow>("SELECT username FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_one(&state.pool)
+                .await?;
+            let user_info = UserInfo { id: user_id, username: user_row.username };
+
+            // Broadcast to other members
+            let participants = sqlx::query_as::<_, UserIdRow>(
+                "SELECT user_id FROM chat_participants WHERE chat_id = $1 AND user_id != $2",
+            )
+            .bind(chat_id)
+            .bind(user_id)
+            .fetch_all(&state.pool)
+            .await?;
+            let typing_msg = ServerWsMsg::TypingIndicator { chat_id, user: user_info };
+            for p in participants {
+                if let Some(tx) = state.clients.get(&p.user_id) {
+                    let _ = tx.send(typing_msg.clone());
+                }
+            }
+        }
+        ClientWsMsg::MarkAsRead { chat_id, last_read_message_id } => {
+            // Check if member
+            let is_member = sqlx::query("SELECT 1 FROM chat_participants WHERE chat_id = $1 AND user_id = $2")
+                .bind(chat_id)
+                .bind(user_id)
+                .fetch_optional(&state.pool)
+                .await?;
+            if is_member.is_none() {
+                return Ok(());
+            }
+
+            // Update last_read_message_id
+            sqlx::query("UPDATE chat_members SET last_read_message_id = $1 WHERE chat_id = $2 AND user_id = $3")
+                .bind(last_read_message_id)
+                .bind(chat_id)
+                .bind(user_id)
+                .execute(&state.pool)
+                .await?;
+
+            // Broadcast messages_read
+            // Logic depends on chat type
+            let chat_type = sqlx::query_scalar::<_, String>("SELECT chat_type FROM chats WHERE id = $1")
+                .bind(chat_id)
+                .fetch_one(&state.pool)
+                .await?;
+            if chat_type == "direct" {
+                // Find peer
+                let peer_id = sqlx::query_scalar::<_, Uuid>(
+                    "SELECT user_id FROM chat_participants WHERE chat_id = $1 AND user_id != $2",
+                )
+                .bind(chat_id)
+                .bind(user_id)
+                .fetch_one(&state.pool)
+                .await?;
+                // Send to peer
+                if let Some(tx) = state.clients.get(&peer_id) {
+                    let _ = tx.send(ServerWsMsg::MessagesRead {
+                        chat_id,
+                        reader_user_id: user_id,
+                        last_read_message_id,
+                        read_count: None,
+                        is_read_by_peer: Some(true),
+                    });
+                }
+            } else {
+                // Group/channel: send to sender of the message
+                let sender_id = sqlx::query_scalar::<_, Uuid>("SELECT sender_id FROM messages WHERE id = $1")
+                    .bind(last_read_message_id)
+                    .fetch_one(&state.pool)
+                    .await?;
+                if let Some(tx) = state.clients.get(&sender_id) {
+                    // Calculate read_count if small group
+                    let participant_count = sqlx::query_scalar::<_, i64>(
+                        "SELECT COUNT(*) FROM chat_participants WHERE chat_id = $1",
+                    )
+                    .bind(chat_id)
+                    .fetch_one(&state.pool)
+                    .await?;
+                    let read_count = if participant_count <= 100 {
+                        Some(sqlx::query_scalar::<_, i32>(
+                            "SELECT COUNT(*) FROM message_reads_small WHERE message_id = $1",
+                        )
+                        .bind(last_read_message_id)
+                        .fetch_one(&state.pool)
+                        .await?)
+                    } else {
+                        None
+                    };
+                    let _ = tx.send(ServerWsMsg::MessagesRead {
+                        chat_id,
+                        reader_user_id: user_id,
+                        last_read_message_id,
+                        read_count,
+                        is_read_by_peer: None,
+                    });
                 }
             }
         }
@@ -187,4 +372,16 @@ fn send_ws_err(state: &AppState, user_id: Uuid, msg: &str) {
             message: msg.to_string(),
         });
     }
+}
+
+async fn get_common_chat_users(state: &AppState, user_id: Uuid) -> Vec<Uuid> {
+    sqlx::query_scalar(
+        "SELECT DISTINCT cp2.user_id FROM chat_participants cp1
+         JOIN chat_participants cp2 ON cp1.chat_id = cp2.chat_id
+         WHERE cp1.user_id = $1 AND cp2.user_id != $1",
+    )
+    .bind(user_id)
+    .fetch_all(&state.pool)
+    .await
+    .unwrap_or_default()
 }
