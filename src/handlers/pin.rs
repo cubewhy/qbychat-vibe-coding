@@ -5,7 +5,7 @@ use crate::ws::ServerWsMsg;
 use actix_web::{post, web, HttpResponse};
 use sqlx::types::Uuid;
 
-#[post("/api/chats/{chat_id}/pin_message")]
+#[post("/v1/api/chats/{chat_id}/pin_message")]
 pub async fn pin_message(
     state: web::Data<AppState>,
     path: web::Path<Uuid>,
@@ -76,6 +76,7 @@ pub async fn pin_message(
         .await
         .map_err(internal_err)?;
         let msg = ServerWsMsg::ChatAction {
+            sequence_id: state.sequence_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
             chat_id,
             action_type: "message_pinned".to_string(),
             data: serde_json::json!({ "pinned_message": pinned_msg }),
@@ -90,7 +91,7 @@ pub async fn pin_message(
     Ok(HttpResponse::Ok().finish())
 }
 
-#[post("/api/chats/{chat_id}/unpin_message")]
+#[post("/v1/api/chats/{chat_id}/unpin_message")]
 pub async fn unpin_message(
     state: web::Data<AppState>,
     path: web::Path<Uuid>,
@@ -133,6 +134,7 @@ pub async fn unpin_message(
     .await
     .map_err(internal_err)?;
     let msg = ServerWsMsg::ChatAction {
+        sequence_id: state.sequence_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
         chat_id,
         action_type: "message_unpinned".to_string(),
         data: serde_json::json!({}),

@@ -14,7 +14,7 @@ pub struct FileDto {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[post("/api/files")] // generic files upload
+#[post("/v1/api/files")] // generic files upload
 pub async fn upload_files(
     state: web::Data<AppState>,
     mut payload: Multipart,

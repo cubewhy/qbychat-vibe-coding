@@ -8,7 +8,7 @@ use crate::state::AppState;
 
 use super::messages::ensure_can_send;
 
-#[post("/api/sticker_packs")]
+#[post("/v1/api/sticker_packs")]
 #[instrument(skip(state, req, user))]
 pub async fn create_pack(
     state: web::Data<AppState>,
@@ -48,7 +48,7 @@ pub async fn create_pack(
         .json(serde_json::json!({"id": pack_id, "title": req.title, "short_name": short})))
 }
 
-#[post("/api/sticker_packs/{pack_id}/stickers")]
+#[post("/v1/api/sticker_packs/{pack_id}/stickers")]
 #[instrument(skip(state, req, user))]
 pub async fn add_sticker(
     state: web::Data<AppState>,
@@ -91,7 +91,7 @@ pub async fn add_sticker(
         .json(serde_json::json!({"id": sticker_id, "pack_id": pack_id, "emoji": req.emoji})))
 }
 
-#[post("/api/sticker_packs/{pack_id}/install")]
+#[post("/v1/api/sticker_packs/{pack_id}/install")]
 pub async fn install_pack(
     state: web::Data<AppState>,
     path: web::Path<Uuid>,
@@ -118,7 +118,7 @@ pub async fn install_pack(
     Ok(HttpResponse::Ok().finish())
 }
 
-#[delete("/api/sticker_packs/{pack_id}/install")]
+#[delete("/v1/api/sticker_packs/{pack_id}/install")]
 pub async fn uninstall_pack(
     state: web::Data<AppState>,
     path: web::Path<Uuid>,
@@ -134,7 +134,7 @@ pub async fn uninstall_pack(
     Ok(HttpResponse::Ok().finish())
 }
 
-#[get("/api/me/sticker_packs")]
+#[get("/v1/api/me/sticker_packs")]
 pub async fn list_my_packs(
     state: web::Data<AppState>,
     user: AuthUser,
@@ -155,7 +155,7 @@ pub async fn list_my_packs(
     Ok(HttpResponse::Ok().json(rows))
 }
 
-#[post("/api/chats/{chat_id}/stickers")]
+#[post("/v1/api/chats/{chat_id}/stickers")]
 #[instrument(skip(state, req, user))]
 pub async fn send_sticker(
     state: web::Data<AppState>,

@@ -15,7 +15,7 @@ pub struct GifSearchQuery {
     pub limit: Option<u8>,
 }
 
-#[get("/api/gifs/search")]
+#[get("/v1/api/gifs/search")]
 pub async fn search_gifs(
     state: web::Data<AppState>,
     _user: AuthUser,
@@ -33,7 +33,7 @@ pub async fn search_gifs(
     Ok(HttpResponse::Ok().json(serde_json::json!({"results": results})))
 }
 
-#[post("/api/chats/{chat_id}/gifs")]
+#[post("/v1/api/chats/{chat_id}/gifs")]
 #[instrument(skip(state, req, user))]
 pub async fn send_gif(
     state: web::Data<AppState>,

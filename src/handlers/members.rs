@@ -49,7 +49,7 @@ async fn ensure_member(
     Ok(is_member)
 }
 
-#[get("/api/chats/{chat_id}/member/note")]
+#[get("/v1/api/chats/{chat_id}/member/note")]
 pub async fn get_note(
     state: web::Data<AppState>,
     path: web::Path<Uuid>,
@@ -69,7 +69,7 @@ pub async fn get_note(
     Ok(HttpResponse::Ok().json(NoteResp { note }))
 }
 
-#[post("/api/chats/{chat_id}/member/note")]
+#[post("/v1/api/chats/{chat_id}/member/note")]
 pub async fn set_note(
     state: web::Data<AppState>,
     path: web::Path<Uuid>,
@@ -85,7 +85,7 @@ pub async fn set_note(
     Ok(HttpResponse::Ok().finish())
 }
 
-#[delete("/api/chats/{chat_id}/member/note")]
+#[delete("/v1/api/chats/{chat_id}/member/note")]
 pub async fn delete_note(
     state: web::Data<AppState>,
     path: web::Path<Uuid>,

@@ -11,7 +11,7 @@ pub struct ListChatsQuery {
     pub include_first: Option<bool>,
 }
 
-#[get("/api/chats")]
+#[get("/v1/api/chats")]
 pub async fn list_chats(
     state: web::Data<AppState>,
     user: AuthUser,

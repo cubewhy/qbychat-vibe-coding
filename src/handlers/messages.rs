@@ -16,7 +16,7 @@ pub struct SendMessageReq {
     pub reply_to_message_id: Option<Uuid>,
 }
 
-#[post("/api/chats/{chat_id}/messages")]
+#[post("/v1/api/chats/{chat_id}/messages")]
 #[instrument(skip(state, req, user))]
 pub async fn send_message(
     state: web::Data<AppState>,
@@ -94,7 +94,7 @@ pub struct EditMessageReq {
     pub content: String,
 }
 
-#[patch("/api/messages/{message_id}")]
+#[patch("/v1/api/messages/{message_id}")]
 pub async fn edit_message(
     state: web::Data<AppState>,
     path: web::Path<Uuid>,
@@ -130,7 +130,7 @@ pub async fn edit_message(
         .fetch_all(&state.pool)
         .await
         .map_err(internal_err)?;
-        let msg = ServerWsMsg::MessageEdited { message: updated };
+        let msg = ServerWsMsg::MessageEdited { sequence_id: state.sequence_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst), message: updated };
         for uid in participants {
             if let Some(tx) = state.clients.get(&uid) {
                 let _ = tx.send(msg.clone());
@@ -141,7 +141,7 @@ pub async fn edit_message(
     Ok(HttpResponse::Ok().finish())
 }
 
-#[delete("/api/messages/{message_id}")]
+#[delete("/v1/api/messages/{message_id}")]
 pub async fn delete_message(
     state: web::Data<AppState>,
     path: web::Path<Uuid>,
@@ -172,7 +172,7 @@ pub async fn delete_message(
         .fetch_all(&state.pool)
         .await
         .map_err(internal_err)?;
-        let msg = ServerWsMsg::MessageDeleted { chat_id, message_ids: vec![message_id] };
+        let msg = ServerWsMsg::MessageDeleted { sequence_id: state.sequence_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst), chat_id, message_ids: vec![message_id] };
         for uid in participants {
             if let Some(tx) = state.clients.get(&uid) {
                 let _ = tx.send(msg.clone());
@@ -189,7 +189,7 @@ pub struct ReadBulkReq {
     pub message_ids: Vec<Uuid>,
 }
 
-#[post("/api/messages/read_bulk")]
+#[post("/v1/api/messages/read_bulk")]
 pub async fn read_bulk(
     state: web::Data<AppState>,
     user: AuthUser,
@@ -283,7 +283,7 @@ pub async fn read_bulk(
     Ok(HttpResponse::Ok().finish())
 }
 
-#[post("/api/admin/reads/purge")]
+#[post("/v1/api/admin/reads/purge")]
 pub async fn purge_reads(state: web::Data<AppState>) -> actix_web::Result<HttpResponse> {
     let threshold = chrono::Utc::now() - chrono::Duration::days(7);
     let res = sqlx::query("DELETE FROM message_reads_small WHERE read_at < $1")
@@ -294,7 +294,7 @@ pub async fn purge_reads(state: web::Data<AppState>) -> actix_web::Result<HttpRe
     Ok(HttpResponse::Ok().json(serde_json::json!({"deleted": res.rows_affected()})))
 }
 
-#[get("/api/chats/{chat_id}/unread_count")]
+#[get("/v1/api/chats/{chat_id}/unread_count")]
 pub async fn unread_count(
     state: web::Data<AppState>,
     path: web::Path<Uuid>,
@@ -341,7 +341,7 @@ pub async fn unread_count(
     Ok(HttpResponse::Ok().json(serde_json::json!({"unread": unread})))
 }
 
-#[post("/api/chats/{chat_id}/forward_messages")]
+#[post("/v1/api/chats/{chat_id}/forward_messages")]
 #[instrument(skip(state, req, user))]
 pub async fn forward_messages(
     state: web::Data<AppState>,
@@ -422,7 +422,7 @@ pub struct ReadsQuery {
     pub limit: Option<usize>,
 }
 
-#[get("/api/messages/{message_id}/reads")]
+#[get("/v1/api/messages/{message_id}/reads")]
 pub async fn list_message_reads(
     state: web::Data<AppState>,
     path: web::Path<Uuid>,

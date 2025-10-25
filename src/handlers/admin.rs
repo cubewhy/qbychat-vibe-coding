@@ -3,7 +3,7 @@ use crate::state::AppState;
 use actix_web::{post, web, HttpResponse};
 use tracing::info;
 
-#[post("/api/admin/storage/purge")]
+#[post("/v1/api/admin/storage/purge")]
 pub async fn purge_storage(
     state: web::Data<AppState>,
     req: actix_web::HttpRequest,

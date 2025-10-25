@@ -21,7 +21,7 @@ async fn ensure_member(
     Ok(is_member)
 }
 
-#[get("/api/chats/{chat_id}/member/notify")]
+#[get("/v1/api/chats/{chat_id}/member/notify")]
 pub async fn get_notify(
     state: web::Data<AppState>,
     path: web::Path<Uuid>,
@@ -42,7 +42,7 @@ pub async fn get_notify(
     }))
 }
 
-#[post("/api/chats/{chat_id}/member/notify")]
+#[post("/v1/api/chats/{chat_id}/member/notify")]
 pub async fn set_notify(
     state: web::Data<AppState>,
     path: web::Path<Uuid>,
@@ -61,7 +61,7 @@ pub async fn set_notify(
     Ok(HttpResponse::Ok().finish())
 }
 
-#[get("/api/chats/{chat_id}/member/mentions")]
+#[get("/v1/api/chats/{chat_id}/member/mentions")]
 pub async fn get_mentions(
     state: web::Data<AppState>,
     path: web::Path<Uuid>,
@@ -89,7 +89,7 @@ pub async fn get_mentions(
     Ok(HttpResponse::Ok().json(serde_json::json!({"mentions": rows})))
 }
 
-#[delete("/api/chats/{chat_id}/member/mentions")]
+#[delete("/v1/api/chats/{chat_id}/member/mentions")]
 pub async fn clear_mentions(
     state: web::Data<AppState>,
     path: web::Path<Uuid>,

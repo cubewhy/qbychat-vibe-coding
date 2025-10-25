@@ -15,7 +15,7 @@ pub struct DownloadTokenResp {
     pub expires_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[post("/api/files/download_token")]
+#[post("/v1/api/files/download_token")]
 pub async fn create_download_token(
     state: web::Data<AppState>,
     _user: AuthUser,
@@ -53,7 +53,7 @@ pub async fn create_download_token(
     Ok(HttpResponse::Ok().json(DownloadTokenResp { token, expires_at }))
 }
 
-#[get("/api/files/{token}")]
+#[get("/v1/api/files/{token}")]
 pub async fn download_file(
     state: web::Data<AppState>,
     path: web::Path<String>,
