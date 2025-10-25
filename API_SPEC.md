@@ -41,6 +41,34 @@ Response 200:
 
 404: peer not found
 
+### POST /api/chats/group
+Create a group chat. Creator becomes owner and first participant.
+
+Request:
+{"title":"string"}
+
+Response 200:
+{"chat_id":"uuid"}
+
+### POST /api/chats/channel
+Create a broadcast channel. Only owner can send messages.
+
+Request:
+{"title":"string"}
+
+Response 200:
+{"chat_id":"uuid"}
+
+### POST /api/chats/{chat_id}/participants
+Add a participant by username. Only owner can add.
+
+Request:
+{"username":"string"}
+
+Response 200: empty
+403: forbidden
+404: user or chat not found
+
 ### GET /api/chats/{chat_id}/messages?limit=50&before=RFC3339
 List messages in a chat (requires membership).
 

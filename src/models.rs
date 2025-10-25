@@ -21,6 +21,15 @@ pub struct AuthResp { pub token: String, pub user: User }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateDirectChatReq { pub peer_username: String }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateGroupReq { pub title: String }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateChannelReq { pub title: String }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AddParticipantReq { pub username: String }
+
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct Chat { pub id: Uuid, pub is_direct: bool, pub created_at: DateTime<Utc> }
 

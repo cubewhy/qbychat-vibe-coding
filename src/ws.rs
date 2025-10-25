@@ -81,6 +81,19 @@ async fn handle_ws_text(state: &AppState, user_id: Uuid, txt: &str) -> anyhow::R
             ).bind(chat_id).bind(user_id).fetch_optional(&state.pool).await?;
             if is_member.is_none() { send_ws_err(state, user_id, "not a member"); return Ok(()); }
 
+            // check chat type for permissions
+            #[derive(sqlx::FromRow)]
+            struct Meta { chat_type: String, owner_id: Option<Uuid> }
+            let meta = sqlx::query_as::<_, Meta>("SELECT chat_type, owner_id FROM chats WHERE id = $1")
+                .bind(chat_id)
+                .fetch_optional(&state.pool)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("chat not found"))?;
+            if meta.chat_type == "channel" && meta.owner_id != Some(user_id) {
+                send_ws_err(state, user_id, "only owner can send in channel");
+                return Ok(());
+            }
+
             let mid = Uuid::new_v4();
             let saved = sqlx::query_as::<_, MessageRow>(
                 r#"INSERT INTO messages (id, chat_id, sender_id, content)

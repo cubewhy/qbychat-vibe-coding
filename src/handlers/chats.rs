@@ -3,7 +3,7 @@ use sqlx::{Pool, Postgres};
 use sqlx::types::Uuid;
 use crate::state::AppState;
 use crate::auth::{AuthUser, internal_err};
-use crate::models::{CreateDirectChatReq, ListQuery, MessageRow};
+use crate::models::{CreateDirectChatReq, CreateGroupReq, CreateChannelReq, AddParticipantReq, ListQuery, MessageRow};
 
 #[post("/api/chats/direct")]
 pub async fn start_direct_chat(state: web::Data<AppState>, req: web::Json<CreateDirectChatReq>, user: AuthUser) -> actix_web::Result<HttpResponse> {
@@ -18,6 +18,56 @@ pub async fn start_direct_chat(state: web::Data<AppState>, req: web::Json<Create
 
     let chat_id = ensure_direct_chat(&state.pool, user.0, peer.id).await.map_err(internal_err)?;
     Ok(HttpResponse::Ok().json(serde_json::json!({ "chat_id": chat_id })))
+}
+
+#[post("/api/chats/group")]
+pub async fn create_group(state: web::Data<AppState>, req: web::Json<CreateGroupReq>, user: AuthUser) -> actix_web::Result<HttpResponse> {
+    let chat_id = Uuid::new_v4();
+    let mut tx = state.pool.begin().await.map_err(internal_err)?;
+    sqlx::query("INSERT INTO chats (id, is_direct, chat_type, owner_id, title) VALUES ($1, FALSE, 'group', $2, $3)")
+        .bind(chat_id).bind(user.0).bind(&req.title)
+        .execute(&mut *tx).await.map_err(internal_err)?;
+    sqlx::query("INSERT INTO chat_participants (chat_id, user_id) VALUES ($1, $2)")
+        .bind(chat_id).bind(user.0).execute(&mut *tx).await.map_err(internal_err)?;
+    tx.commit().await.map_err(internal_err)?;
+    Ok(HttpResponse::Ok().json(serde_json::json!({ "chat_id": chat_id })))
+}
+
+#[post("/api/chats/channel")]
+pub async fn create_channel(state: web::Data<AppState>, req: web::Json<CreateChannelReq>, user: AuthUser) -> actix_web::Result<HttpResponse> {
+    let chat_id = Uuid::new_v4();
+    let mut tx = state.pool.begin().await.map_err(internal_err)?;
+    sqlx::query("INSERT INTO chats (id, is_direct, chat_type, owner_id, title) VALUES ($1, FALSE, 'channel', $2, $3)")
+        .bind(chat_id).bind(user.0).bind(&req.title)
+        .execute(&mut *tx).await.map_err(internal_err)?;
+    sqlx::query("INSERT INTO chat_participants (chat_id, user_id) VALUES ($1, $2)")
+        .bind(chat_id).bind(user.0).execute(&mut *tx).await.map_err(internal_err)?;
+    tx.commit().await.map_err(internal_err)?;
+    Ok(HttpResponse::Ok().json(serde_json::json!({ "chat_id": chat_id })))
+}
+
+#[post("/api/chats/{chat_id}/participants")]
+pub async fn add_participant(state: web::Data<AppState>, path: web::Path<Uuid>, req: web::Json<AddParticipantReq>, user: AuthUser) -> actix_web::Result<HttpResponse> {
+    let chat_id = path.into_inner();
+    #[derive(sqlx::FromRow)]
+    struct ChatMeta { chat_type: String, owner_id: Option<Uuid> }
+    let meta = sqlx::query_as::<_, ChatMeta>("SELECT chat_type, owner_id FROM chats WHERE id = $1")
+        .bind(chat_id).fetch_optional(&state.pool).await.map_err(internal_err)?
+        .ok_or_else(|| actix_web::error::ErrorNotFound("chat not found"))?;
+
+    // Only owner can add participants for now
+    if meta.owner_id != Some(user.0) { return Ok(HttpResponse::Forbidden().finish()); }
+
+    #[derive(sqlx::FromRow)]
+    struct IdRow { id: Uuid }
+    let peer = sqlx::query_as::<_, IdRow>("SELECT id FROM users WHERE username = $1")
+        .bind(req.username.trim()).fetch_optional(&state.pool).await.map_err(internal_err)?
+        .ok_or_else(|| actix_web::error::ErrorNotFound("user not found"))?;
+
+    sqlx::query("INSERT INTO chat_participants (chat_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+        .bind(chat_id).bind(peer.id).execute(&state.pool).await.map_err(internal_err)?;
+
+    Ok(HttpResponse::Ok().finish())
 }
 
 #[get("/api/chats/{chat_id}/messages")]
